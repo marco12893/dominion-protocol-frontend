@@ -15,6 +15,12 @@ const INITIAL_UNITS = [
   { id: "unit-4", x: 540, y: 300 },
   { id: "unit-5", x: 660, y: 220 },
 ];
+const INITIAL_OBSTACLES = [
+  { id: "rock-1", x: 240, y: 110, width: 150, height: 90 },
+  { id: "rock-2", x: 470, y: 250, width: 120, height: 140 },
+  { id: "rock-3", x: 690, y: 90, width: 120, height: 100 },
+  { id: "rock-4", x: 150, y: 350, width: 180, height: 90 },
+];
 
 export default function Home() {
   const socketRef = useRef(null);
@@ -22,6 +28,7 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [selectedUnitIds, setSelectedUnitIds] = useState(["unit-1"]);
   const [units, setUnits] = useState(INITIAL_UNITS);
+  const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [selectionBox, setSelectionBox] = useState(null);
 
   useEffect(() => {
@@ -40,6 +47,10 @@ export default function Home() {
     });
 
     socket.on("world:state", (state) => {
+      if (Array.isArray(state?.obstacles)) {
+        setObstacles(state.obstacles);
+      }
+
       if (Array.isArray(state?.units)) {
         setUnits(
           state.units.map((unit) => ({
@@ -149,6 +160,20 @@ export default function Home() {
     }));
   }
 
+  function handleMapDoubleClick(event) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = toMapPoint(event, bounds);
+    const clickedUnit = units.find(
+      (unit) =>
+        Math.abs(unit.x - point.x) <= UNIT_SELECTION_RADIUS &&
+        Math.abs(unit.y - point.y) <= UNIT_SELECTION_RADIUS,
+    );
+
+    if (clickedUnit) {
+      setSelectedUnitIds(units.map((unit) => unit.id));
+    }
+  }
+
   const selectionBounds = selectionBox
     ? normalizeSelection(selectionBox)
     : null;
@@ -166,7 +191,7 @@ export default function Home() {
             </h1>
             <p className="mt-2 text-sm text-slate-300">
               Drag a selection box with left click, then right-click the map to
-              move the selected units.
+              move the selected units. Paths will route around obstacles.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -188,6 +213,7 @@ export default function Home() {
 
         <div
           ref={mapRef}
+          onDoubleClick={handleMapDoubleClick}
           onPointerDown={handleMapPointerDown}
           onContextMenu={handleMapRightClick}
           className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#13212d] shadow-2xl shadow-black/30 select-none"
@@ -202,6 +228,19 @@ export default function Home() {
           }}
         >
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(34,197,94,0.06),transparent_35%,rgba(34,211,238,0.08))]" />
+
+          {obstacles.map((obstacle) => (
+            <div
+              key={obstacle.id}
+              className="absolute rounded-2xl border border-stone-300/25 bg-[linear-gradient(135deg,rgba(71,85,105,0.9),rgba(30,41,59,0.95))] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_36px_rgba(15,23,42,0.35)]"
+              style={{
+                left: `${obstacle.x}px`,
+                top: `${obstacle.y}px`,
+                width: `${obstacle.width}px`,
+                height: `${obstacle.height}px`,
+              }}
+            />
+          ))}
 
           {selectionBounds ? (
             <div
