@@ -3,25 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const MAP_WIDTH = 960;
-const MAP_HEIGHT = 540;
+const MAP_WIDTH = 3200;
+const MAP_HEIGHT = 3200;
 const UNIT_SELECTION_RADIUS = 12;
 const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000";
+
 const INITIAL_UNITS = [
-  { id: "unit-1", owner: "player", x: 180, y: 160, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-2", owner: "player", x: 300, y: 240, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-3", owner: "player", x: 420, y: 180, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-4", owner: "player", x: 540, y: 300, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-5", owner: "player", x: 660, y: 220, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "enemy-1", owner: "enemy", x: 800, y: 200, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-1", owner: "player", x: 420, y: 420, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-2", owner: "player", x: 480, y: 480, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-3", owner: "player", x: 440, y: 560, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-4", owner: "player", x: 1720, y: 1300, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-5", owner: "player", x: 1820, y: 1380, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "enemy-1", owner: "enemy", x: 2000, y: 2000, health: 100, maxHealth: 100, attackTargetId: null },
 ];
+
 const INITIAL_OBSTACLES = [
-  { id: "rock-1", x: 240, y: 110, width: 150, height: 90 },
-  { id: "rock-2", x: 470, y: 250, width: 120, height: 140 },
-  { id: "rock-3", x: 690, y: 90, width: 120, height: 100 },
-  { id: "rock-4", x: 150, y: 350, width: 180, height: 90 },
+  { id: "rock-1", x: 640, y: 510, width: 350, height: 290 },
+  { id: "rock-2", x: 1470, y: 1250, width: 320, height: 440 },
+  { id: "rock-3", x: 2190, y: 890, width: 420, height: 300 },
+  { id: "rock-4", x: 850, y: 2350, width: 480, height: 290 },
+  { id: "rock-5", x: 2600, y: 2600, width: 200, height: 300 },
 ];
 
 export default function Home() {
@@ -33,9 +36,17 @@ export default function Home() {
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [selectionBox, setSelectionBox] = useState(null);
   const [isAttackMoveMode, setIsAttackMoveMode] = useState(false);
+  
+  const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const keysRef = useRef({ ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false });
 
+  // Keyboard controls
   useEffect(() => {
     function handleKeyDown(e) {
+      if (e.key in keysRef.current) {
+        keysRef.current[e.key] = true;
+      }
       if (e.key.toLowerCase() === "a") {
         if (selectedUnitIds.length > 0) {
           setIsAttackMoveMode(true);
@@ -49,9 +60,73 @@ export default function Home() {
         setIsAttackMoveMode(false);
       }
     }
+    
+    function handleKeyUp(e) {
+      if (e.key in keysRef.current) {
+        keysRef.current[e.key] = false;
+      }
+    }
+    
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, [selectedUnitIds]);
+
+  // Mouse tracking for edge pan
+  useEffect(() => {
+    function handleMouseMove(e) {
+      mousePosRef.current = { x: e.clientX, y: e.clientY };
+    }
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  // Camera panning animation loop
+  useEffect(() => {
+    let animationFrameId;
+    let lastTime = performance.now();
+
+    function updateCamera(time) {
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+
+      const panSpeed = 900; // pixels per second
+      const edgeThreshold = 40;
+      
+      let dx = 0;
+      let dy = 0;
+
+      if (keysRef.current.ArrowUp) dy -= panSpeed * dt;
+      if (keysRef.current.ArrowDown) dy += panSpeed * dt;
+      if (keysRef.current.ArrowLeft) dx -= panSpeed * dt;
+      if (keysRef.current.ArrowRight) dx += panSpeed * dt;
+
+      // Edge panning logic
+      if (mousePosRef.current.x < edgeThreshold) dx -= panSpeed * dt;
+      if (mousePosRef.current.x > window.innerWidth - edgeThreshold) dx += panSpeed * dt;
+      if (mousePosRef.current.y < edgeThreshold) dy -= panSpeed * dt;
+      if (mousePosRef.current.y > window.innerHeight - edgeThreshold) dy += panSpeed * dt;
+
+      if (dx !== 0 || dy !== 0) {
+        setCamera((cam) => {
+          const maxCamX = Math.max(0, MAP_WIDTH - window.innerWidth);
+          const maxCamY = Math.max(0, MAP_HEIGHT - window.innerHeight);
+          return {
+            x: Math.max(0, Math.min(maxCamX, cam.x + dx)),
+            y: Math.max(0, Math.min(maxCamY, cam.y + dy)),
+          };
+        });
+      }
+
+      animationFrameId = requestAnimationFrame(updateCamera);
+    }
+
+    animationFrameId = requestAnimationFrame(updateCamera);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, {
@@ -94,6 +169,13 @@ export default function Home() {
     };
   }, []);
 
+  function toMapPoint(clientX, clientY) {
+    return {
+      x: Math.max(0, Math.min(MAP_WIDTH, clientX + camera.x)),
+      y: Math.max(0, Math.min(MAP_HEIGHT, clientY + camera.y)),
+    };
+  }
+
   function handleMapRightClick(event) {
     event.preventDefault();
 
@@ -105,11 +187,7 @@ export default function Home() {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const clickPoint = {
-      x: Math.max(0, Math.min(MAP_WIDTH, event.clientX - bounds.left)),
-      y: Math.max(0, Math.min(MAP_HEIGHT, event.clientY - bounds.top)),
-    };
+    const clickPoint = toMapPoint(event.clientX, event.clientY);
 
     const clickedEnemy = units.find(
       (unit) =>
@@ -123,7 +201,6 @@ export default function Home() {
         unitIds: selectedUnitIds,
         targetId: clickedEnemy.id,
       });
-
       return;
     }
 
@@ -139,18 +216,16 @@ export default function Home() {
     }
 
     function handlePointerMove(event) {
-      const bounds = mapRef.current?.getBoundingClientRect();
-
-      if (!bounds) {
-        return;
-      }
-
-      const current = toMapPoint(event, bounds);
+      const currentPoint = {
+          x: Math.max(0, Math.min(MAP_WIDTH, event.clientX + camera.x)),
+          y: Math.max(0, Math.min(MAP_HEIGHT, event.clientY + camera.y))
+      };
+      
       const nextSelectionBox = {
         startX: selectionBox.startX,
         startY: selectionBox.startY,
-        currentX: current.x,
-        currentY: current.y,
+        currentX: currentPoint.x,
+        currentY: currentPoint.y,
       };
 
       setSelectionBox(nextSelectionBox);
@@ -158,20 +233,18 @@ export default function Home() {
     }
 
     function handlePointerUp(event) {
-      const bounds = mapRef.current?.getBoundingClientRect();
+      const currentPoint = {
+          x: Math.max(0, Math.min(MAP_WIDTH, event.clientX + camera.x)),
+          y: Math.max(0, Math.min(MAP_HEIGHT, event.clientY + camera.y))
+      };
+      const completedSelection = {
+        startX: selectionBox.startX,
+        startY: selectionBox.startY,
+        currentX: currentPoint.x,
+        currentY: currentPoint.y,
+      };
 
-      if (bounds) {
-        const current = toMapPoint(event, bounds);
-        const completedSelection = {
-          startX: selectionBox.startX,
-          startY: selectionBox.startY,
-          currentX: current.x,
-          currentY: current.y,
-        };
-
-        setSelectedUnitIds(getUnitsInSelection(units, completedSelection));
-      }
-
+      setSelectedUnitIds(getUnitsInSelection(units, completedSelection));
       setSelectionBox(null);
     }
 
@@ -182,15 +255,14 @@ export default function Home() {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [selectionBox, units]);
+  }, [selectionBox, units, camera]);
 
   function handleMapPointerDown(event) {
     if (event.button !== 0) {
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const start = toMapPoint(event, bounds);
+    const start = toMapPoint(event.clientX, event.clientY);
 
     if (isAttackMoveMode) {
       socketRef.current?.emit("unit:attackMove", {
@@ -216,8 +288,7 @@ export default function Home() {
   }
 
   function handleMapDoubleClick(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const point = toMapPoint(event, bounds);
+    const point = toMapPoint(event.clientX, event.clientY);
     const clickedUnit = units.find(
       (unit) =>
         unit.owner === "player" &&
@@ -245,26 +316,28 @@ export default function Home() {
     : null;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#23384d_0%,#0f1722_45%,#05070a_100%)] px-6 py-10 text-slate-100">
-      <section className="w-full max-w-6xl">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300/80">
-              Dominion Protocol
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              RTS Prototype
-            </h1>
-            <p className="mt-2 text-sm text-slate-300">
-              Drag a selection box with left click, then right-click the map to
-              move the selected units. Paths will route around obstacles.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
+    <main className="fixed inset-0 overflow-hidden bg-slate-950 font-sans text-slate-100 select-none">
+      
+      {/* UI Overlay */}
+      <div className="absolute top-6 left-6 z-50 pointer-events-auto flex flex-col gap-4 max-w-sm">
+        <div className="rounded-2xl border border-white/10 bg-[#0f1722]/80 backdrop-blur-md p-5 shadow-2xl">
+          <p className="text-xs uppercase tracking-[0.35em] text-cyan-400 font-bold">
+            Dominion Protocol
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white drop-shadow-md">
+            RTS Prototype
+          </h1>
+          <p className="mt-2 text-xs text-slate-300 leading-relaxed">
+            Drag to select units. Right-click to move. Hit <kbd className="px-1 py-0.5 rounded bg-slate-800 text-cyan-200 font-mono text-[10px]">A</kbd> for Attack Move, and <kbd className="px-1 py-0.5 rounded bg-slate-800 text-cyan-200 font-mono text-[10px]">S</kbd> to Stop. Edge pan or use Arrow keys to move camera.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
               id="reset-player-btn"
               onClick={() => socketRef.current?.emit("player:reset")}
-              className="rounded-full border border-sky-400/50 bg-sky-400/15 px-4 py-2 text-sm text-sky-200 transition hover:bg-sky-400/25 hover:border-sky-400/70 cursor-pointer"
+              className="rounded-full border border-sky-400/50 bg-sky-500/20 px-5 py-2 text-sm font-medium text-sky-200 shadow-[0_0_15px_rgba(14,165,233,0.15)] transition hover:bg-sky-400/30 hover:border-sky-400/80 cursor-pointer"
             >
               ↺ Reset Units
             </button>
@@ -272,61 +345,73 @@ export default function Home() {
               <button
                 id="respawn-enemy-btn"
                 onClick={handleRespawnEnemy}
-                className="rounded-full border border-rose-400/50 bg-rose-400/15 px-4 py-2 text-sm text-rose-200 transition hover:bg-rose-400/25 hover:border-rose-400/70 cursor-pointer"
+                className="rounded-full border border-rose-400/50 bg-rose-500/20 px-5 py-2 text-sm font-medium text-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.15)] transition hover:bg-rose-400/30 hover:border-rose-400/80 cursor-pointer"
               >
                 ↻ Respawn Enemy
               </button>
             ) : null}
-            <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200">
-              Selected:{" "}
-              {selectedUnitIds.length > 0 ? selectedUnitIds.join(", ") : "none"}
-            </div>
-            <div
-              className={`rounded-full border px-4 py-2 text-sm ${
-                isConnected
-                  ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-200"
-                  : "border-amber-400/50 bg-amber-400/15 text-amber-200"
-              }`}
-            >
-              {isConnected ? "Socket connected" : "Socket disconnected"}
-            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-[#0f1722]/70 backdrop-blur-sm p-4 text-sm shadow-xl">
+             <div className="flex items-center justify-between mb-2">
+                 <span className="text-slate-400">Connection</span>
+                 <span className={`flex items-center gap-1.5 ${isConnected ? "text-emerald-400" : "text-amber-400"}`}>
+                    <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-400" : "bg-amber-400"} animate-pulse`} />
+                    {isConnected ? "Online" : "Offline"}
+                 </span>
+             </div>
+             <div className="flex items-start justify-between">
+                 <span className="text-slate-400 mt-1">Selected</span>
+                 <span className="text-right text-slate-200 max-w-[150px] truncate">
+                     {selectedUnitIds.length > 0 ? selectedUnitIds.join(", ") : "none"}
+                 </span>
+             </div>
           </div>
         </div>
+      </div>
 
+      {/* Map Interaction Area */}
+      <div
+        ref={mapRef}
+        onDoubleClick={handleMapDoubleClick}
+        onPointerDown={handleMapPointerDown}
+        onContextMenu={handleMapRightClick}
+        className={`absolute inset-0 touch-none ${isAttackMoveMode ? 'cursor-crosshair' : 'cursor-default'}`}
+      >
+        {/* World Space Container */}
         <div
-          ref={mapRef}
-          onDoubleClick={handleMapDoubleClick}
-          onPointerDown={handleMapPointerDown}
-          onContextMenu={handleMapRightClick}
-          className={`relative overflow-hidden rounded-3xl border border-white/10 bg-[#13212d] shadow-2xl shadow-black/30 select-none ${isAttackMoveMode ? 'cursor-crosshair' : ''}`}
+          className="absolute left-0 top-0 origin-top-left shadow-[inset_0_0_100px_rgba(0,0,0,0.8)]"
           style={{
-            width: "100%",
-            maxWidth: `${MAP_WIDTH}px`,
-            aspectRatio: `${MAP_WIDTH} / ${MAP_HEIGHT}`,
-            backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px), radial-gradient(circle at center, rgba(43,91,122,0.22), rgba(9,16,24,0.92))",
-            backgroundSize: "48px 48px, 48px 48px, cover",
-            backgroundPosition: "-1px -1px, -1px -1px, center",
+            width: `${MAP_WIDTH}px`,
+            height: `${MAP_HEIGHT}px`,
+            transform: `translate3d(${-camera.x}px, ${-camera.y}px, 0)`,
+            backgroundColor: "#070c13",
+            backgroundImage: "linear-gradient(rgba(34,211,238,0.04) 2px, transparent 2px), linear-gradient(90deg, rgba(34,211,238,0.04) 2px, transparent 2px), linear-gradient(rgba(34,211,238,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.015) 1px, transparent 1px)",
+            backgroundSize: "120px 120px, 120px 120px, 24px 24px, 24px 24px"
           }}
         >
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(34,197,94,0.06),transparent_35%,rgba(34,211,238,0.08))]" />
+          {/* Map borders decorative */}
+          <div className="absolute inset-0 border-[4px] border-cyan-900/40 pointer-events-none" />
 
           {obstacles.map((obstacle) => (
             <div
               key={obstacle.id}
-              className="absolute rounded-2xl border border-stone-300/25 bg-[linear-gradient(135deg,rgba(71,85,105,0.9),rgba(30,41,59,0.95))] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_36px_rgba(15,23,42,0.35)]"
+              className="absolute rounded-xl border-t border-l border-white/10 bg-[linear-gradient(135deg,rgba(30,41,59,0.8),rgba(15,23,42,0.95))] shadow-[0_20px_40px_rgba(0,0,0,0.5)]"
               style={{
                 left: `${obstacle.x}px`,
                 top: `${obstacle.y}px`,
                 width: `${obstacle.width}px`,
                 height: `${obstacle.height}px`,
               }}
-            />
+            >
+              <div className="absolute inset-x-2 top-0 h-px bg-cyan-400/20" />
+              <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(34,211,238,0.03)_50%,transparent_100%)] opacity-50 block" />
+            </div>
           ))}
 
           {selectionBounds ? (
             <div
-              className="pointer-events-none absolute border border-cyan-200/80 bg-cyan-300/10"
+              className="pointer-events-none absolute border border-cyan-300 bg-cyan-400/10 shadow-[inset_0_0_20px_rgba(34,211,238,0.2)]"
               style={{
                 left: `${selectionBounds.left}px`,
                 top: `${selectionBounds.top}px`,
@@ -358,13 +443,14 @@ export default function Home() {
                 <div
                   className="absolute left-1/2 -translate-x-1/2"
                   style={{
-                    top: "-14px",
-                    width: "24px",
+                    top: "-18px",
+                    width: "28px",
                     height: "4px",
                     borderRadius: "2px",
-                    backgroundColor: "rgba(0, 0, 0, 0.6)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    backgroundColor: "rgba(10, 15, 25, 0.8)",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
                     overflow: "hidden",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.5)"
                   }}
                 >
                   <div
@@ -374,31 +460,32 @@ export default function Home() {
                       borderRadius: "1px",
                       backgroundColor:
                         healthPercent > 60
-                          ? "#22c55e"
+                          ? "#34d399"
                           : healthPercent > 30
-                            ? "#eab308"
-                            : "#ef4444",
+                            ? "#fbbf24"
+                            : "#f43f5e",
                       transition: "width 0.15s ease",
+                      boxShadow: "inset 0 1px 1px rgba(255,255,255,0.4)"
                     }}
                   />
                 </div>
 
                 {/* Selection ring */}
                 <span
-                  className={`absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border transition ${
+                  className={`absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all ${
                     isSelected
-                      ? "border-amber-300/90 shadow-[0_0_18px_rgba(252,211,77,0.45)]"
+                      ? "border-amber-300/80 shadow-[0_0_15px_rgba(252,211,77,0.4)] scale-100 opacity-100"
                       : isAttacking
-                        ? "border-red-400/60 shadow-[0_0_12px_rgba(239,68,68,0.3)]"
-                        : "border-transparent"
+                        ? "border-rose-400/60 shadow-[0_0_12px_rgba(244,63,94,0.3)] scale-100 opacity-100"
+                        : "border-transparent scale-50 opacity-0"
                   }`}
                 />
 
-                {/* Unit dot */}
+                {/* Unit shape */}
                 {isEnemy ? (
-                  <span className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-200/80 bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.9)]" />
+                  <div className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 shadow-[0_0_20px_rgba(244,63,94,0.6)]" />
                 ) : (
-                  <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/80 bg-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.9)]" />
+                  <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
                 )}
 
                 {/* Muzzle flash */}
@@ -407,18 +494,18 @@ export default function Home() {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
                     const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
-                    const radius = isEnemy ? 12 : 10;
+                    const radius = isEnemy ? 14 : 12;
                     return (
                       <div
                         className="absolute left-1/2 top-1/2"
                         style={{
-                          transform: `translate(-50%, -50%) rotate(${angle}rad) translateX(${radius + 2}px)`,
+                          transform: `translate(-50%, -50%) rotate(${angle}rad) translateX(${radius + 4}px)`,
                         }}
                       >
                         <div
-                          className="h-1.5 w-3 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,1)]"
+                          className="h-1.5 w-4 rounded-full bg-yellow-200 shadow-[0_0_15px_rgba(253,224,71,1)]"
                           style={{
-                            animation: "muzzle-flash 0.08s ease-in-out infinite alternate",
+                            animation: "muzzle-flash 0.06s ease-in-out infinite alternate",
                           }}
                         />
                       </div>
@@ -429,22 +516,15 @@ export default function Home() {
             );
           })}
         </div>
-      </section>
+      </div>
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes muzzle-flash {
-          0% { opacity: 0; transform: scaleX(0.5); }
-          100% { opacity: 1; transform: scaleX(1.3); }
+          0% { opacity: 0; transform: scaleX(0.4); }
+          100% { opacity: 1; transform: scaleX(1.5); }
         }
       `}} />
     </main>
   );
-}
-
-function toMapPoint(event, bounds) {
-  return {
-    x: Math.max(0, Math.min(MAP_WIDTH, event.clientX - bounds.left)),
-    y: Math.max(0, Math.min(MAP_HEIGHT, event.clientY - bounds.top)),
-  };
 }
 
 function normalizeSelection(selection) {
