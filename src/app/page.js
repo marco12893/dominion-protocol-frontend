@@ -6,14 +6,16 @@ import { io } from "socket.io-client";
 const MAP_WIDTH = 960;
 const MAP_HEIGHT = 540;
 const UNIT_SELECTION_RADIUS = 12;
+const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000";
 const INITIAL_UNITS = [
-  { id: "unit-1", x: 180, y: 160 },
-  { id: "unit-2", x: 300, y: 240 },
-  { id: "unit-3", x: 420, y: 180 },
-  { id: "unit-4", x: 540, y: 300 },
-  { id: "unit-5", x: 660, y: 220 },
+  { id: "unit-1", owner: "player", x: 180, y: 160, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-2", owner: "player", x: 300, y: 240, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-3", owner: "player", x: 420, y: 180, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-4", owner: "player", x: 540, y: 300, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-5", owner: "player", x: 660, y: 220, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "enemy-1", owner: "enemy", x: 800, y: 200, health: 100, maxHealth: 100, attackTargetId: null },
 ];
 const INITIAL_OBSTACLES = [
   { id: "rock-1", x: 240, y: 110, width: 150, height: 90 },
@@ -55,8 +57,12 @@ export default function Home() {
         setUnits(
           state.units.map((unit) => ({
             id: unit.id,
+            owner: unit.owner,
             x: unit.x,
             y: unit.y,
+            health: unit.health,
+            maxHealth: unit.maxHealth,
+            attackTargetId: unit.attackTargetId,
           })),
         );
       }
@@ -76,14 +82,30 @@ export default function Home() {
     }
 
     const bounds = event.currentTarget.getBoundingClientRect();
-    const position = {
+    const clickPoint = {
       x: Math.max(0, Math.min(MAP_WIDTH, event.clientX - bounds.left)),
       y: Math.max(0, Math.min(MAP_HEIGHT, event.clientY - bounds.top)),
     };
 
+    const clickedEnemy = units.find(
+      (unit) =>
+        unit.owner === "enemy" &&
+        unit.health > 0 &&
+        Math.hypot(unit.x - clickPoint.x, unit.y - clickPoint.y) <= UNIT_CLICK_RADIUS,
+    );
+
+    if (clickedEnemy) {
+      socketRef.current?.emit("unit:attack", {
+        unitIds: selectedUnitIds,
+        targetId: clickedEnemy.id,
+      });
+
+      return;
+    }
+
     socketRef.current?.emit("unit:move", {
       unitIds: selectedUnitIds,
-      position,
+      position: clickPoint,
     });
   }
 
@@ -165,14 +187,25 @@ export default function Home() {
     const point = toMapPoint(event, bounds);
     const clickedUnit = units.find(
       (unit) =>
+        unit.owner === "player" &&
         Math.abs(unit.x - point.x) <= UNIT_SELECTION_RADIUS &&
         Math.abs(unit.y - point.y) <= UNIT_SELECTION_RADIUS,
     );
 
     if (clickedUnit) {
-      setSelectedUnitIds(units.map((unit) => unit.id));
+      setSelectedUnitIds(
+        units.filter((unit) => unit.owner === "player").map((unit) => unit.id),
+      );
     }
   }
+
+  function handleRespawnEnemy() {
+    socketRef.current?.emit("enemy:respawn");
+  }
+
+  const enemyAlive = units.some(
+    (unit) => unit.owner === "enemy" && unit.health > 0,
+  );
 
   const selectionBounds = selectionBox
     ? normalizeSelection(selectionBox)
@@ -195,6 +228,15 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {!enemyAlive ? (
+              <button
+                id="respawn-enemy-btn"
+                onClick={handleRespawnEnemy}
+                className="rounded-full border border-rose-400/50 bg-rose-400/15 px-4 py-2 text-sm text-rose-200 transition hover:bg-rose-400/25 hover:border-rose-400/70 cursor-pointer"
+              >
+                ↻ Respawn Enemy
+              </button>
+            ) : null}
             <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200">
               Selected:{" "}
               {selectedUnitIds.length > 0 ? selectedUnitIds.join(", ") : "none"}
@@ -255,7 +297,13 @@ export default function Home() {
           ) : null}
 
           {units.map((unit) => {
-            const isSelected = selectedUnitIds.includes(unit.id);
+            const isPlayer = unit.owner === "player";
+            const isSelected = isPlayer && selectedUnitIds.includes(unit.id);
+            const isEnemy = unit.owner === "enemy";
+            const healthPercent = unit.maxHealth > 0
+              ? (unit.health / unit.maxHealth) * 100
+              : 0;
+            const isAttacking = isPlayer && unit.attackTargetId;
 
             return (
               <div
@@ -266,14 +314,52 @@ export default function Home() {
                   top: `${unit.y}px`,
                 }}
               >
+                {/* Health bar */}
+                <div
+                  className="absolute left-1/2 -translate-x-1/2"
+                  style={{
+                    top: "-14px",
+                    width: "24px",
+                    height: "4px",
+                    borderRadius: "2px",
+                    backgroundColor: "rgba(0, 0, 0, 0.6)",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${healthPercent}%`,
+                      height: "100%",
+                      borderRadius: "1px",
+                      backgroundColor:
+                        healthPercent > 60
+                          ? "#22c55e"
+                          : healthPercent > 30
+                            ? "#eab308"
+                            : "#ef4444",
+                      transition: "width 0.15s ease",
+                    }}
+                  />
+                </div>
+
+                {/* Selection ring */}
                 <span
                   className={`absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border transition ${
                     isSelected
                       ? "border-amber-300/90 shadow-[0_0_18px_rgba(252,211,77,0.45)]"
-                      : "border-transparent"
+                      : isAttacking
+                        ? "border-red-400/60 shadow-[0_0_12px_rgba(239,68,68,0.3)]"
+                        : "border-transparent"
                   }`}
                 />
-                <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/80 bg-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.9)]" />
+
+                {/* Unit dot */}
+                {isEnemy ? (
+                  <span className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-200/80 bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.9)]" />
+                ) : (
+                  <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/80 bg-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.9)]" />
+                )}
               </div>
             );
           })}
@@ -314,6 +400,10 @@ function getUnitsInSelection(units, selection) {
 
   return units
     .filter((unit) => {
+      if (unit.owner !== "player") {
+        return false;
+      }
+
       if (isClickSelection) {
         return (
           Math.abs(unit.x - selection.currentX) <= UNIT_SELECTION_RADIUS &&
