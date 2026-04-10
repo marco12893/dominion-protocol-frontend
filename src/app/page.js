@@ -36,6 +36,16 @@ export default function Home() {
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [selectionBox, setSelectionBox] = useState(null);
   const [isAttackMoveMode, setIsAttackMoveMode] = useState(false);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  
+  useEffect(() => {
+    function handleResize() {
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    }
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
   
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -515,6 +525,32 @@ export default function Home() {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Minimap Overlay */}
+      <div className="absolute bottom-6 right-6 z-50 overflow-hidden rounded-xl border border-white/20 bg-[#070c13]/90 shadow-2xl backdrop-blur-md"
+           style={{ width: 200, height: 200, padding: 4 }}
+      >
+        <div className="relative w-full h-full bg-[#0a121c] rounded-lg overflow-hidden outline outline-1 outline-white/5 pointer-events-none">
+           {obstacles.map(obs => (
+             <div key={obs.id} className="absolute bg-slate-700/50 rounded-sm" 
+                  style={{ left: obs.x * (192 / MAP_WIDTH), top: obs.y * (192 / MAP_HEIGHT), width: obs.width * (192 / MAP_WIDTH), height: obs.height * (192 / MAP_HEIGHT) }} />
+           ))}
+           <div className="absolute border-[1.5px] border-white/60 bg-white/5 pointer-events-none transition-all duration-75" 
+                style={{ 
+                  left: camera.x * (192 / MAP_WIDTH), 
+                  top: camera.y * (192 / MAP_HEIGHT), 
+                  width: windowSize.width * (192 / MAP_WIDTH), 
+                  height: windowSize.height * (192 / MAP_HEIGHT) 
+                }} />
+           {units.map(unit => {
+             const isEnemy = unit.owner === "enemy";
+             return (
+               <div key={unit.id} className={`absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-75 ${isEnemy ? 'bg-rose-500 shadow-[0_0_4px_rgba(244,63,94,0.8)]' : 'bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.8)]'}`}
+                    style={{ left: unit.x * (192 / MAP_WIDTH), top: unit.y * (192 / MAP_HEIGHT) }} />
+             )
+           })}
         </div>
       </div>
       <style dangerouslySetInnerHTML={{__html: `
