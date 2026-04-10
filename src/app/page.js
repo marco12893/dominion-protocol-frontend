@@ -32,6 +32,26 @@ export default function Home() {
   const [units, setUnits] = useState(INITIAL_UNITS);
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [selectionBox, setSelectionBox] = useState(null);
+  const [isAttackMoveMode, setIsAttackMoveMode] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.key.toLowerCase() === "a") {
+        if (selectedUnitIds.length > 0) {
+          setIsAttackMoveMode(true);
+        }
+      } else if (e.key.toLowerCase() === "s") {
+        setIsAttackMoveMode(false);
+        if (selectedUnitIds.length > 0) {
+          socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds });
+        }
+      } else if (e.key === "Escape") {
+        setIsAttackMoveMode(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedUnitIds]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, {
@@ -76,6 +96,10 @@ export default function Home() {
 
   function handleMapRightClick(event) {
     event.preventDefault();
+
+    if (isAttackMoveMode) {
+      setIsAttackMoveMode(false);
+    }
 
     if (selectedUnitIds.length === 0) {
       return;
@@ -168,6 +192,15 @@ export default function Home() {
     const bounds = event.currentTarget.getBoundingClientRect();
     const start = toMapPoint(event, bounds);
 
+    if (isAttackMoveMode) {
+      socketRef.current?.emit("unit:attackMove", {
+        unitIds: selectedUnitIds,
+        position: start,
+      });
+      setIsAttackMoveMode(false);
+      return;
+    }
+
     setSelectionBox({
       startX: start.x,
       startY: start.y,
@@ -228,6 +261,13 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              id="reset-player-btn"
+              onClick={() => socketRef.current?.emit("player:reset")}
+              className="rounded-full border border-sky-400/50 bg-sky-400/15 px-4 py-2 text-sm text-sky-200 transition hover:bg-sky-400/25 hover:border-sky-400/70 cursor-pointer"
+            >
+              ↺ Reset Units
+            </button>
             {!enemyAlive ? (
               <button
                 id="respawn-enemy-btn"
@@ -258,7 +298,7 @@ export default function Home() {
           onDoubleClick={handleMapDoubleClick}
           onPointerDown={handleMapPointerDown}
           onContextMenu={handleMapRightClick}
-          className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#13212d] shadow-2xl shadow-black/30 select-none"
+          className={`relative overflow-hidden rounded-3xl border border-white/10 bg-[#13212d] shadow-2xl shadow-black/30 select-none ${isAttackMoveMode ? 'cursor-crosshair' : ''}`}
           style={{
             width: "100%",
             maxWidth: `${MAP_WIDTH}px`,
