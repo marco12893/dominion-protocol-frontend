@@ -360,11 +360,42 @@ export default function Home() {
                 ) : (
                   <span className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/80 bg-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.9)]" />
                 )}
+
+                {/* Muzzle flash */}
+                {unit.attackTargetId && (
+                  (() => {
+                    const target = units.find(u => u.id === unit.attackTargetId);
+                    if (!target) return null;
+                    const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
+                    const radius = isEnemy ? 12 : 10;
+                    return (
+                      <div
+                        className="absolute left-1/2 top-1/2"
+                        style={{
+                          transform: `translate(-50%, -50%) rotate(${angle}rad) translateX(${radius + 2}px)`,
+                        }}
+                      >
+                        <div
+                          className="h-1.5 w-3 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,1)]"
+                          style={{
+                            animation: "muzzle-flash 0.08s ease-in-out infinite alternate",
+                          }}
+                        />
+                      </div>
+                    );
+                  })()
+                )}
               </div>
             );
           })}
         </div>
       </section>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes muzzle-flash {
+          0% { opacity: 0; transform: scaleX(0.5); }
+          100% { opacity: 1; transform: scaleX(1.3); }
+        }
+      `}} />
     </main>
   );
 }
