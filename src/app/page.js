@@ -8,15 +8,21 @@ const MAP_HEIGHT = 3200;
 const UNIT_SELECTION_RADIUS = 12;
 const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
-  process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000";
+  process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:10000";
 
 const INITIAL_UNITS = [
-  { id: "unit-1", owner: "player", x: 420, y: 420, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-2", owner: "player", x: 480, y: 480, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-3", owner: "player", x: 440, y: 560, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-4", owner: "player", x: 1720, y: 1300, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "unit-5", owner: "player", x: 1820, y: 1380, health: 100, maxHealth: 100, attackTargetId: null },
-  { id: "enemy-1", owner: "enemy", x: 2000, y: 2000, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-1", owner: "player", variantId: "rifleman", x: 420, y: 420, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-2", owner: "player", variantId: "rifleman", x: 480, y: 480, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-3", owner: "player", variantId: "rifleman", x: 440, y: 560, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-4", owner: "player", variantId: "rifleman", x: 1720, y: 1300, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-5", owner: "player", variantId: "rifleman", x: 1820, y: 1380, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-at-1", owner: "player", variantId: "antiTank", x: 450, y: 420, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-at-2", owner: "player", variantId: "antiTank", x: 510, y: 480, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-at-3", owner: "player", variantId: "antiTank", x: 470, y: 560, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-at-4", owner: "player", variantId: "antiTank", x: 1750, y: 1300, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "unit-at-5", owner: "player", variantId: "antiTank", x: 1850, y: 1380, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "enemy-1", owner: "enemy", variantId: "rifleman", x: 2000, y: 2000, health: 100, maxHealth: 100, attackTargetId: null },
+  { id: "enemy-2", owner: "enemy", variantId: "armoredDummy", x: 2100, y: 2000, health: 100, maxHealth: 100, attackTargetId: null },
 ];
 
 const INITIAL_OBSTACLES = [
@@ -169,6 +175,7 @@ export default function Home() {
             health: unit.health,
             maxHealth: unit.maxHealth,
             attackTargetId: unit.attackTargetId,
+            isFiring: unit.isFiring,
           })),
         );
       }
@@ -309,7 +316,9 @@ export default function Home() {
 
     if (clickedUnit) {
       setSelectedUnitIds(
-        units.filter((unit) => unit.owner === "player").map((unit) => unit.id),
+        units
+          .filter((unit) => unit.owner === "player" && unit.variantId === clickedUnit.variantId)
+          .map((unit) => unit.id),
       );
     }
   }
@@ -493,16 +502,16 @@ export default function Home() {
                 />
 
                 {/* Unit shape */}
-                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 h-7 w-7 text-[10px] font-bold leading-none -translate-x-1/2 -translate-y-1/2 shadow-[0_0_15px_rgba(34,211,238,0.5)] ${
+                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 h-7 w-7 text-[8px] font-extrabold leading-none -translate-x-1/2 -translate-y-1/2 shadow-inner ${
                   isEnemy 
-                    ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
-                    : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-100 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
+                    ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-50 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
+                    : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-50 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
                 } ${unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
-                  {unit.variantId === "rifleman" ? "R" : unit.variantId === "armoredDummy" ? "A" : ""}
+                  {unit.variantId === "rifleman" ? "R" : unit.variantId === "antiTank" ? "AT" : unit.variantId === "armoredDummy" ? "A" : ""}
                 </div>
 
                 {/* Muzzle flash */}
-                {unit.attackTargetId && (
+                {unit.isFiring && (
                   (() => {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
@@ -516,9 +525,9 @@ export default function Home() {
                         }}
                       >
                         <div
-                          className="h-1.5 w-4 rounded-full bg-yellow-200 shadow-[0_0_15px_rgba(253,224,71,1)]"
+                          className="h-2 w-6 rounded-full bg-yellow-300 shadow-[0_0_20px_rgba(253,224,71,1)]"
                           style={{
-                            animation: "muzzle-flash 0.06s ease-in-out infinite alternate",
+                            animation: "muzzle-flash 0.08s ease-in-out infinite alternate",
                           }}
                         />
                       </div>
