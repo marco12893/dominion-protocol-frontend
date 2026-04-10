@@ -163,6 +163,7 @@ export default function Home() {
           state.units.map((unit) => ({
             id: unit.id,
             owner: unit.owner,
+            variantId: unit.variantId,
             x: unit.x,
             y: unit.y,
             health: unit.health,
@@ -492,11 +493,13 @@ export default function Home() {
                 />
 
                 {/* Unit shape */}
-                {isEnemy ? (
-                  <div className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 shadow-[0_0_20px_rgba(244,63,94,0.6)]" />
-                ) : (
-                  <div className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
-                )}
+                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 h-7 w-7 text-[10px] font-bold leading-none -translate-x-1/2 -translate-y-1/2 shadow-[0_0_15px_rgba(34,211,238,0.5)] ${
+                  isEnemy 
+                    ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
+                    : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-100 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
+                } ${unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
+                  {unit.variantId === "rifleman" ? "R" : unit.variantId === "armoredDummy" ? "A" : ""}
+                </div>
 
                 {/* Muzzle flash */}
                 {unit.attackTargetId && (
