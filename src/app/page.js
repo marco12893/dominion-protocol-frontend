@@ -326,6 +326,8 @@ export default function Home() {
             attackTargetId: unit.attackTargetId,
             isFiring: unit.isFiring,
             isHoldingPosition: !!unit.isHoldingPosition,
+            speed: unit.speed ?? 0,
+            damageModifiers: unit.damageModifiers ?? {},
           })),
         );
       }
@@ -1020,7 +1022,7 @@ export default function Home() {
           </div>
 
           {/* ─── CENTER: UNIT INFO PANEL (7/12) ─── */}
-          <div className="flex items-center justify-center p-3 overflow-hidden" style={{ width: 'calc(100% * 7 / 12)' }}>
+          <div className="flex items-center justify-center p-3 overflow-visible" style={{ width: 'calc(100% * 7 / 12)' }}>
             {selectedUnit && selectedUnitDisplay ? (
               <div className="flex items-center justify-center gap-8 w-full">
                 {/* Unit Portrait (left side) */}
@@ -1095,10 +1097,27 @@ export default function Home() {
                         </svg>
                       </div>
                       {hoveredTooltip === 'armor' && (
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg bg-[#0c1829] border border-cyan-800/50 shadow-xl text-[11px] text-slate-200 whitespace-nowrap z-[60]">
-                          <div className="font-semibold text-cyan-300 mb-1">Armor</div>
-                          <div>Defense: <span className="text-white font-mono">{selectedUnit.armor}</span></div>
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-transparent border-t-cyan-800/50" />
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 p-4 rounded-xl bg-[#0c1829]/95 border border-cyan-500/30 shadow-[0_15px_30px_rgba(0,0,0,0.8)] text-[11px] text-slate-200 whitespace-nowrap z-[60] backdrop-blur-md min-w-[160px]">
+                          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-cyan-500/20">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-cyan-400">
+                              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            <div className="font-bold text-cyan-300 uppercase tracking-wider text-[10px]">Defense Profile</div>
+                          </div>
+                          
+                          <div className="space-y-2">
+                             <div className="flex justify-between items-center gap-4">
+                               <span className="text-slate-400">Plating Armor:</span>
+                               <span className="text-white font-mono font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">{selectedUnit.armor}</span>
+                             </div>
+                             <div className="flex justify-between items-center gap-4">
+                               <span className="text-slate-400">Move Speed:</span>
+                               <span className="text-white font-mono font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">{selectedUnit.speed}</span>
+                             </div>
+                          </div>
+
+                          {/* Pointer arrow */}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-transparent border-t-cyan-900/40" />
                         </div>
                       )}
                     </div>
@@ -1118,12 +1137,54 @@ export default function Home() {
                         </svg>
                       </div>
                       {hoveredTooltip === 'damage' && (
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg bg-[#0c1829] border border-rose-800/50 shadow-xl text-[11px] text-slate-200 whitespace-nowrap z-[60]">
-                          <div className="font-semibold text-rose-300 mb-1">{selectedUnitDisplay.damageDescription}</div>
-                          <div>Damage: <span className="text-white font-mono">{selectedUnit.attackDamage}</span></div>
-                          <div>Range: <span className="text-white font-mono">{selectedUnit.attackRange}</span></div>
-                          <div>Cooldown: <span className="text-white font-mono">{selectedUnit.attackCooldownTime}s</span></div>
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-transparent border-t-rose-800/50" />
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 p-4 rounded-xl bg-[#0d090a]/95 border border-rose-500/30 shadow-[0_15px_30px_rgba(0,0,0,0.8)] text-[11px] text-slate-200 min-w-[220px] z-[60] backdrop-blur-md">
+                          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-rose-500/20">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-rose-400">
+                               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                               <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                            <div className="font-bold text-rose-300 uppercase tracking-wider text-[10px]">Weaponry: {selectedUnitDisplay.name}</div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-3">
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-slate-400">Base ATK:</span>
+                              <span className="text-white font-mono font-bold">{selectedUnit.attackDamage}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-slate-400">Range:</span>
+                              <span className="text-white font-mono font-bold">{selectedUnit.attackRange}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-slate-400">Rate:</span>
+                              <span className="text-white font-mono font-bold">{selectedUnit.attackCooldownTime}s</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="text-[9px] uppercase tracking-widest text-slate-500 font-bold mb-1">Damage vs. Armor Classes</div>
+                            {Object.entries(selectedUnit.damageModifiers || {}).map(([type, mod]) => {
+                               const damageAmt = Math.floor(selectedUnit.attackDamage * mod * 10) / 10;
+                               return (
+                                 <div key={type} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded border border-white/5">
+                                   <span className="text-[10px] capitalize text-slate-300">{type}</span>
+                                   <div className="flex items-center gap-1.5">
+                                      {mod > 1 ? <span className="text-emerald-400 text-[9px] font-bold">▲</span> : mod < 1 ? <span className="text-rose-400 text-[9px] font-bold">▼</span> : null}
+                                      <span className={`font-mono font-bold ${mod > 1 ? 'text-emerald-400' : mod < 0.5 ? 'text-rose-400' : 'text-white'}`}>
+                                        {damageAmt}
+                                      </span>
+                                   </div>
+                                 </div>
+                               );
+                            })}
+                          </div>
+
+                          <div className="mt-2 pt-2 border-t border-white/5 text-[9px] text-slate-500 italic leading-tight">
+                            * Values shown are before target defense subtraction.
+                          </div>
+
+                          {/* Pointer arrow */}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[7px] border-transparent border-t-rose-900/40" />
                         </div>
                       )}
                     </div>
