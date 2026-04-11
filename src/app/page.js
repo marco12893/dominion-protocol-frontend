@@ -65,6 +65,13 @@ export default function Home() {
   const [isAttackMoveMode, setIsAttackMoveMode] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [hoveredTooltip, setHoveredTooltip] = useState(null);
+  const [controlGroups, setControlGroups] = useState({});
+  const lastDigitKeyPressRef = useRef({});
+  const latestStateRef = useRef({});
+
+  useEffect(() => {
+    latestStateRef.current = { controlGroups, units, windowSize };
+  });
   
   useEffect(() => {
     function handleResize() {
@@ -94,8 +101,60 @@ export default function Home() {
         if (selectedUnitIds.length > 0) {
           socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds });
         }
+      } else if (e.key.toLowerCase() === "h") {
+        setIsAttackMoveMode(false);
+        if (selectedUnitIds.length > 0) {
+          socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds });
+        }
       } else if (e.key === "Escape") {
         setIsAttackMoveMode(false);
+      } else {
+        const digitMatch = e.code?.match(/^(?:Digit|Numpad)([0-9])$/);
+        if (digitMatch) {
+          const digitKey = digitMatch[1];
+          if (e.ctrlKey || e.shiftKey) {
+            e.preventDefault(); // Stop browser from switching tabs (Ctrl+Number)
+          }
+
+          if (e.ctrlKey) {
+            setControlGroups(prev => ({ ...prev, [digitKey]: selectedUnitIds }));
+          } else if (e.shiftKey) {
+            setControlGroups(prev => {
+              const existing = prev[digitKey] || [];
+              return { ...prev, [digitKey]: Array.from(new Set([...existing, ...selectedUnitIds])) };
+            });
+          } else {
+            const now = Date.now();
+            const lastTime = lastDigitKeyPressRef.current[digitKey] || 0;
+            const isDoubleTap = now - lastTime < 350;
+            lastDigitKeyPressRef.current[digitKey] = now;
+
+            const latest = latestStateRef.current;
+            const groupIds = (latest.controlGroups[digitKey] || [])
+              .filter(id => latest.units.some(u => u.id === id && u.owner === 'player' && u.health > 0));
+            
+            setSelectedUnitIds(groupIds);
+
+            if (isDoubleTap && groupIds.length > 0) {
+              const groupUnits = latest.units.filter(u => groupIds.includes(u.id));
+              let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+              for (const u of groupUnits) {
+                 if (u.x < minX) minX = u.x;
+                 if (u.x > maxX) maxX = u.x;
+                 if (u.y < minY) minY = u.y;
+                 if (u.y > maxY) maxY = u.y;
+              }
+              const cx = (minX + maxX) / 2;
+              const cy = (minY + maxY) / 2;
+              const maxCamX = Math.max(0, MAP_WIDTH - latest.windowSize.width);
+              const maxCamY = Math.max(0, MAP_HEIGHT - latest.windowSize.height);
+              setCamera({
+                x: Math.max(0, Math.min(maxCamX, cx - latest.windowSize.width / 2)),
+                y: Math.max(0, Math.min(maxCamY, cy - latest.windowSize.height / 2)),
+              });
+            }
+          }
+        }
       }
     }
     
@@ -204,6 +263,7 @@ export default function Home() {
             kills: unit.kills ?? 0,
             attackTargetId: unit.attackTargetId,
             isFiring: unit.isFiring,
+            isHoldingPosition: !!unit.isHoldingPosition,
           })),
         );
       }
@@ -319,6 +379,37 @@ export default function Home() {
       return;
     }
 
+    if (event.ctrlKey) {
+      const clickedUnit = units.find(
+        (unit) =>
+          unit.owner === "player" &&
+          Math.abs(unit.x - start.x) <= UNIT_SELECTION_RADIUS &&
+          Math.abs(unit.y - start.y) <= UNIT_SELECTION_RADIUS,
+      );
+
+      if (clickedUnit) {
+        const screenLeft = camera.x;
+        const screenRight = camera.x + windowSize.width;
+        const screenTop = camera.y;
+        const screenBottom = camera.y + windowSize.height;
+
+        setSelectedUnitIds(
+          units
+            .filter(
+              (u) =>
+                u.owner === "player" &&
+                u.variantId === clickedUnit.variantId &&
+                u.x >= screenLeft &&
+                u.x <= screenRight &&
+                u.y >= screenTop &&
+                u.y <= screenBottom
+            )
+            .map((u) => u.id),
+        );
+        return;
+      }
+    }
+
     setSelectionBox({
       startX: start.x,
       startY: start.y,
@@ -343,10 +434,23 @@ export default function Home() {
     );
 
     if (clickedUnit) {
+      const screenLeft = camera.x;
+      const screenRight = camera.x + windowSize.width;
+      const screenTop = camera.y;
+      const screenBottom = camera.y + windowSize.height;
+
       setSelectedUnitIds(
         units
-          .filter((unit) => unit.owner === "player" && unit.variantId === clickedUnit.variantId)
-          .map((unit) => unit.id),
+          .filter(
+            (u) =>
+              u.owner === "player" &&
+              u.variantId === clickedUnit.variantId &&
+              u.x >= screenLeft &&
+              u.x <= screenRight &&
+              u.y >= screenTop &&
+              u.y <= screenBottom
+          )
+          .map((u) => u.id),
       );
     }
   }
@@ -522,9 +626,11 @@ export default function Home() {
                   className={`absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all ${
                     isSelected
                       ? "border-amber-300/80 shadow-[0_0_15px_rgba(252,211,77,0.4)] scale-100 opacity-100"
-                      : isAttacking
-                        ? "border-rose-400/60 shadow-[0_0_12px_rgba(244,63,94,0.3)] scale-100 opacity-100"
-                        : "border-transparent scale-50 opacity-0"
+                      : unit.isHoldingPosition
+                        ? "border-cyan-400/60 border-dashed shadow-[0_0_12px_rgba(34,211,238,0.3)] scale-100 opacity-100"
+                        : isAttacking
+                          ? "border-rose-400/60 shadow-[0_0_12px_rgba(244,63,94,0.3)] scale-100 opacity-100"
+                          : "border-transparent scale-50 opacity-0"
                   }`}
                 />
 
@@ -565,6 +671,63 @@ export default function Home() {
             );
           })}
         </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          CONTROL GROUPS OVERLAY
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="absolute left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-end gap-[3px]" style={{ bottom: 185 }}>
+        {Object.entries(controlGroups).sort(([a],[b]) => a.localeCompare(b)).map(([key, ids]) => {
+          const validUnits = ids.map(id => units.find(u => u.id === id && u.owner === 'player' && u.health > 0)).filter(Boolean);
+          if (validUnits.length === 0) return null;
+          const displayUnit = validUnits[0];
+          const displayInfo = UNIT_DISPLAY_INFO[displayUnit.variantId] || { shortLabel: '?' };
+          
+          return (
+             <button 
+               key={`cg-${key}`}
+               className="group flex flex-col items-center"
+               onClick={() => setSelectedUnitIds(validUnits.map(u => u.id))}
+               onDoubleClick={(e) => {
+                 e.preventDefault();
+                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                 for (const u of validUnits) {
+                    if (u.x < minX) minX = u.x;
+                    if (u.x > maxX) maxX = u.x;
+                    if (u.y < minY) minY = u.y;
+                    if (u.y > maxY) maxY = u.y;
+                 }
+                 const cx = (minX + maxX) / 2;
+                 const cy = (minY + maxY) / 2;
+                 const maxCamX = Math.max(0, MAP_WIDTH - windowSize.width);
+                 const maxCamY = Math.max(0, MAP_HEIGHT - windowSize.height);
+                 setCamera({
+                   x: Math.max(0, Math.min(maxCamX, cx - windowSize.width / 2)),
+                   y: Math.max(0, Math.min(maxCamY, cy - windowSize.height / 2)),
+                 });
+               }}
+             >
+               <div className="relative w-[34px] h-[34px] bg-gradient-to-b from-[#18283a] to-[#0c141d] border border-[#2a4563] rounded shadow-[0_4px_12px_rgba(0,0,0,0.8)] transition-all group-hover:border-cyan-400/80 xl:group-hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] flex items-center justify-center mb-[3px]">
+                 {/* Unit Icon inside the box */}
+                 <div className={`w-[22px] h-[22px] flex items-center justify-center text-[10px] font-black leading-none bg-gradient-to-br from-green-400 to-green-600 text-green-50 shadow-[0_0_10px_rgba(74,222,128,0.5)] ${displayUnit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
+                   {displayInfo.shortLabel}
+                 </div>
+                 {/* Count Badge */}
+                 <div className="absolute -bottom-1 -right-1 bg-[#0a1018] border border-cyan-900/80 text-[9px] font-bold font-mono text-cyan-200 px-1 rounded-sm shadow-md z-10 min-w-[14px] text-center">
+                   {validUnits.length}
+                 </div>
+                 {/* Selection Highlight (if this exact group is currently selected) */}
+                 {selectedUnitIds.length === validUnits.length && validUnits.every(u => selectedUnitIds.includes(u.id)) && (
+                   <div className="absolute inset-x-0 -bottom-[1px] h-[2px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+                 )}
+               </div>
+               {/* Control Group Number Box */}
+               <div className="w-[18px] bg-gradient-to-b from-[#142031] to-[#090f17] border border-[#233a54] rounded-[2px] text-center text-[10px] font-bold text-slate-300 drop-shadow-md group-hover:border-cyan-400/80 group-hover:text-cyan-300 transition-colors pointer-events-none">
+                 {key}
+               </div>
+             </button>
+          );
+        })}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -887,8 +1050,30 @@ export default function Home() {
                 <span className="text-[8px] mt-0.5 font-bold tracking-wide text-slate-400">S</span>
               </button>
 
+              {/* Hold Position command */}
+              <button
+                id="cmd-hold-btn"
+                onClick={() => {
+                  setIsAttackMoveMode(false);
+                  if (selectedUnitIds.length > 0) {
+                    socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds });
+                  }
+                }}
+                className={`relative w-full aspect-square rounded-md border flex flex-col items-center justify-center cursor-pointer transition-all ${
+                  selectedUnitIds.length > 0 && selectedUnitIds.every(id => { const u = units.find(un=>un.id===id); return u && u.isHoldingPosition; })
+                    ? 'border-cyan-400/80 bg-cyan-500/20 shadow-[0_0_12px_rgba(34,211,238,0.3)]'
+                    : 'border-slate-600/50 bg-slate-800/70 hover:border-cyan-500/50 hover:bg-slate-700/70'
+                }`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={selectedUnitIds.length > 0 && selectedUnitIds.every(id => { const u = units.find(un=>un.id===id); return u && u.isHoldingPosition; }) ? 'text-cyan-300' : 'text-slate-300'}>
+                   <path d="M12 2v20M5 12h14" />
+                   <rect x="8" y="8" width="8" height="8" rx="1" />
+                </svg>
+                <span className="text-[8px] mt-0.5 font-bold tracking-wide text-slate-400">H</span>
+              </button>
+
               {/* Empty slots to fill the grid */}
-              {[...Array(7)].map((_, i) => (
+              {[...Array(6)].map((_, i) => (
                 <div
                   key={`empty-${i}`}
                   className="w-full aspect-square rounded-md border border-slate-700/30 bg-slate-900/30"
