@@ -10,20 +10,7 @@ const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:10000";
 
-const INITIAL_UNITS = [
-  { id: "unit-1", owner: "player", variantId: "rifleman", unitClass: "unarmored", x: 420, y: 420, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-2", owner: "player", variantId: "rifleman", unitClass: "unarmored", x: 480, y: 480, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-3", owner: "player", variantId: "rifleman", unitClass: "unarmored", x: 440, y: 560, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-4", owner: "player", variantId: "rifleman", unitClass: "unarmored", x: 1720, y: 1300, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-5", owner: "player", variantId: "rifleman", unitClass: "unarmored", x: 1820, y: 1380, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-at-1", owner: "player", variantId: "antiTank", unitClass: "unarmored", x: 450, y: 420, health: 100, maxHealth: 100, attackDamage: 40, attackRange: 160, attackCooldownTime: 2.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-at-2", owner: "player", variantId: "antiTank", unitClass: "unarmored", x: 510, y: 480, health: 100, maxHealth: 100, attackDamage: 40, attackRange: 160, attackCooldownTime: 2.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-at-3", owner: "player", variantId: "antiTank", unitClass: "unarmored", x: 470, y: 560, health: 100, maxHealth: 100, attackDamage: 40, attackRange: 160, attackCooldownTime: 2.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-at-4", owner: "player", variantId: "antiTank", unitClass: "unarmored", x: 1750, y: 1300, health: 100, maxHealth: 100, attackDamage: 40, attackRange: 160, attackCooldownTime: 2.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "unit-at-5", owner: "player", variantId: "antiTank", unitClass: "unarmored", x: 1850, y: 1380, health: 100, maxHealth: 100, attackDamage: 40, attackRange: 160, attackCooldownTime: 2.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "enemy-1", owner: "enemy", variantId: "rifleman", unitClass: "unarmored", x: 2000, y: 2000, health: 100, maxHealth: 100, attackDamage: 10, attackRange: 120, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-  { id: "enemy-2", owner: "enemy", variantId: "armoredDummy", unitClass: "armored", x: 2100, y: 2000, health: 500, maxHealth: 500, attackDamage: 0, attackRange: 0, attackCooldownTime: 1.0, armor: 0, kills: 0, attackTargetId: null },
-];
+const INITIAL_UNITS = [];
 
 const INITIAL_OBSTACLES = [
   { id: "rock-1", x: 640, y: 510, width: 350, height: 290 },
@@ -58,7 +45,7 @@ export default function Home() {
   const socketRef = useRef(null);
   const mapRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [selectedUnitIds, setSelectedUnitIds] = useState(["unit-1"]);
+  const [selectedUnitIds, setSelectedUnitIds] = useState([]);
   const [units, setUnits] = useState(INITIAL_UNITS);
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [selectionBox, setSelectionBox] = useState(null);
@@ -67,8 +54,43 @@ export default function Home() {
   const [hoveredTooltip, setHoveredTooltip] = useState(null);
   const [controlGroups, setControlGroups] = useState({});
   const [orderMarkers, setOrderMarkers] = useState([]);
+  const [playerColor, setPlayerColor] = useState(null); // 'blue' or 'red'
+  const [teamSelections, setTeamSelections] = useState({
+    blue: { socketId: null, isOnline: false },
+    red: { socketId: null, isOnline: false }
+  });
+  const [notifications, setNotifications] = useState([]);
+
+  const addNotification = (message, type = 'info') => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setNotifications(prev => [{ id, message, type, timestamp: Date.now() }, ...prev].slice(0, 5));
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const prevTeamSelectionsRef = useRef(teamSelections);
+  const opponentColor = playerColor === 'blue' ? 'red' : 'blue';
+
+  // Monitor opponent deployment
+  useEffect(() => {
+    if (!playerColor) return;
+    const opp = teamSelections[opponentColor];
+    const prevOpp = prevTeamSelectionsRef.current?.[opponentColor];
+    
+    if (opp?.isOnline && !prevOpp?.isOnline) {
+      addNotification(`${opponentColor.toUpperCase()} COMMANDER DEPLOYED`, opponentColor);
+    }
+    prevTeamSelectionsRef.current = teamSelections;
+  }, [teamSelections, playerColor, opponentColor]);
+  
   const lastDigitKeyPressRef = useRef({});
   const latestStateRef = useRef({});
+  const playerColorRef = useRef(null);
+
+  useEffect(() => {
+    playerColorRef.current = playerColor;
+  }, [playerColor]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -143,7 +165,7 @@ export default function Home() {
 
             const latest = latestStateRef.current;
             const groupIds = (latest.controlGroups[digitKey] || [])
-              .filter(id => latest.units.some(u => u.id === id && u.owner === 'player' && u.health > 0));
+              .filter(id => latest.units.some(u => u.id === id && u.owner === playerColor && u.health > 0));
             
             setSelectedUnitIds(groupIds);
 
@@ -252,7 +274,17 @@ export default function Home() {
       setIsConnected(false);
     });
 
+    socket.on("game:reset", () => {
+      setPlayerColor(null);
+      setSelectedUnitIds([]);
+      setControlGroups({});
+    });
+
     socket.on("world:state", (state) => {
+      if (state?.teamSelections) {
+        setTeamSelections(state.teamSelections);
+      }
+      
       if (Array.isArray(state?.obstacles)) {
         setObstacles(state.obstacles);
       }
@@ -309,7 +341,7 @@ export default function Home() {
 
     const clickedEnemy = units.find(
       (unit) =>
-        unit.owner === "enemy" &&
+        unit.owner !== playerColor &&
         unit.health > 0 &&
         Math.hypot(unit.x - clickPoint.x, unit.y - clickPoint.y) <= UNIT_CLICK_RADIUS,
     );
@@ -350,7 +382,7 @@ export default function Home() {
       };
 
       setSelectionBox(nextSelectionBox);
-      setSelectedUnitIds(getUnitsInSelection(units, nextSelectionBox));
+      setSelectedUnitIds(getUnitsInSelection(units, nextSelectionBox, playerColor));
     }
 
     function handlePointerUp(event) {
@@ -365,7 +397,7 @@ export default function Home() {
         currentY: currentPoint.y,
       };
 
-      setSelectedUnitIds(getUnitsInSelection(units, completedSelection));
+      setSelectedUnitIds(getUnitsInSelection(units, completedSelection, playerColor));
       setSelectionBox(null);
     }
 
@@ -399,7 +431,7 @@ export default function Home() {
     if (event.ctrlKey) {
       const clickedUnit = units.find(
         (unit) =>
-          unit.owner === "player" &&
+          unit.owner === playerColor &&
           Math.abs(unit.x - start.x) <= UNIT_SELECTION_RADIUS &&
           Math.abs(unit.y - start.y) <= UNIT_SELECTION_RADIUS,
       );
@@ -414,7 +446,7 @@ export default function Home() {
           units
             .filter(
               (u) =>
-                u.owner === "player" &&
+                u.owner === playerColor &&
                 u.variantId === clickedUnit.variantId &&
                 u.x >= screenLeft &&
                 u.x <= screenRight &&
@@ -438,14 +470,14 @@ export default function Home() {
       startY: start.y,
       currentX: start.x,
       currentY: start.y,
-    }));
+    }, playerColor));
   }
 
   function handleMapDoubleClick(event) {
     const point = toMapPoint(event.clientX, event.clientY);
     const clickedUnit = units.find(
       (unit) =>
-        unit.owner === "player" &&
+        unit.owner === playerColor &&
         Math.abs(unit.x - point.x) <= UNIT_SELECTION_RADIUS &&
         Math.abs(unit.y - point.y) <= UNIT_SELECTION_RADIUS,
     );
@@ -460,7 +492,7 @@ export default function Home() {
         units
           .filter(
             (u) =>
-              u.owner === "player" &&
+              u.owner === playerColor &&
               u.variantId === clickedUnit.variantId &&
               u.x >= screenLeft &&
               u.x <= screenRight &&
@@ -472,12 +504,33 @@ export default function Home() {
     }
   }
 
-  function handleRespawnEnemy() {
+  const handleRespawnEnemy = () => {
     socketRef.current?.emit("enemy:respawn");
   }
 
+  const handleJoinTeam = (color) => {
+    socketRef.current?.emit("player:join", color);
+    setPlayerColor(color);
+
+    // Teleport camera to spawn location
+    if (color === "blue") {
+      setCamera({ x: 0, y: 0 }); // Top-left
+    } else {
+      setCamera({ 
+        x: Math.max(0, MAP_WIDTH - windowSize.width), 
+        y: Math.max(0, MAP_HEIGHT - windowSize.height) 
+      }); // Bottom-right
+    }
+    
+    addNotification(`DEPLOYMENT AUTHORIZED: ${color.toUpperCase()} OPS`, color);
+  }
+
+  // Remove the old const opponentColor calculation if it still exists
+
+  const opponentDisconnected = teamSelections[opponentColor]?.socketId && !teamSelections[opponentColor]?.isOnline;
+
   const enemyAlive = units.some(
-    (unit) => unit.owner === "enemy" && unit.health > 0,
+    (unit) => unit.owner !== playerColor && unit.health > 0,
   );
 
   const selectionBounds = selectionBox
@@ -508,25 +561,6 @@ export default function Home() {
           </h1>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            id="reset-player-btn"
-            onClick={() => socketRef.current?.emit("player:reset")}
-            className="rounded-full border border-sky-400/50 bg-sky-500/20 px-4 py-1.5 text-xs font-medium text-sky-200 shadow-[0_0_15px_rgba(14,165,233,0.15)] transition hover:bg-sky-400/30 hover:border-sky-400/80 cursor-pointer"
-          >
-            ↺ Reset Units
-          </button>
-          {!enemyAlive ? (
-            <button
-              id="respawn-enemy-btn"
-              onClick={handleRespawnEnemy}
-              className="rounded-full border border-rose-400/50 bg-rose-500/20 px-4 py-1.5 text-xs font-medium text-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.15)] transition hover:bg-rose-400/30 hover:border-rose-400/80 cursor-pointer"
-            >
-              ↻ Respawn Enemy
-            </button>
-          ) : null}
-        </div>
-
         <div className="rounded-lg border border-white/10 bg-[#0f1722]/70 backdrop-blur-sm p-3 text-xs shadow-xl">
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Connection</span>
@@ -537,6 +571,73 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Center UI: Active Command & Notifications */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-3 pointer-events-none">
+        {playerColor && (
+          <div className={`px-6 py-2 rounded-full border-2 bg-slate-900/90 backdrop-blur-md shadow-2xl flex items-center gap-3 transition-all duration-500 scale-in-center ${
+            playerColor === 'red' ? 'border-rose-500/50 shadow-rose-500/20' : 'border-cyan-500/50 shadow-cyan-500/20'
+          }`}>
+            <div className={`w-2 h-2 rounded-full animate-pulse ${playerColor === 'red' ? 'bg-rose-500' : 'bg-cyan-500'}`} />
+            <span className="text-[10px] uppercase tracking-[0.3em] font-black text-white">
+              Commanding: <span className={playerColor === 'red' ? 'text-rose-400' : 'text-cyan-400'}>{playerColor} Ops</span>
+            </span>
+          </div>
+        )}
+
+        {/* Notifications List */}
+        <div className="flex flex-col gap-2">
+          {notifications.map(n => (
+            <div key={n.id} className={`px-4 py-2 rounded border bg-slate-950/90 backdrop-blur-sm shadow-xl flex items-center gap-3 animate-notification ${
+              n.type === 'red' ? 'border-rose-500/30' : n.type === 'blue' ? 'border-cyan-500/30' : 'border-white/10'
+            }`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${n.type === 'red' ? 'bg-rose-500' : n.type === 'blue' ? 'bg-cyan-500' : 'bg-white'}`} />
+              <span className="text-[10px] font-bold tracking-widest text-slate-100 uppercase">
+                {n.message}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Top Right: Global Reset & Alerts */}
+      <div className="absolute top-4 right-4 z-[60] flex flex-col items-end gap-3 pointer-events-auto">
+        <button
+          id="reset-player-btn"
+          onClick={() => socketRef.current?.emit("player:reset")}
+          className="px-5 py-2 rounded border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all backdrop-blur-md flex items-center gap-2"
+        >
+          <span>☣</span> Global Reset
+        </button>
+
+        {opponentDisconnected && playerColor && (
+          <div className="px-4 py-1.5 bg-rose-600/20 border border-rose-500/50 rounded backdrop-blur-md animate-pulse">
+            <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-2">
+              <span className="text-sm">⚠️</span> Opponent Disconnected
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Animations */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes notification-slide {
+          0% { transform: translateY(-20px); opacity: 0; }
+          10% { transform: translateY(0); opacity: 1; }
+          90% { transform: translateY(0); opacity: 1; }
+          100% { transform: translateY(-10px); opacity: 0; }
+        }
+        .animate-notification {
+          animation: notification-slide 4s ease-in-out forwards;
+        }
+        .scale-in-center {
+          animation: scale-in-center 0.5s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
+        }
+        @keyframes scale-in-center {
+          0% { transform: scale(0); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}} />
 
       {/* Map Interaction Area */}
       <div
@@ -645,13 +746,12 @@ export default function Home() {
           ) : null}
 
           {units.map((unit) => {
-            const isPlayer = unit.owner === "player";
-            const isSelected = isPlayer && selectedUnitIds.includes(unit.id);
-            const isEnemy = unit.owner === "enemy";
+            const isOwned = unit.owner === playerColor;
+            const isSelected = isOwned && selectedUnitIds.includes(unit.id);
             const healthPercent = unit.maxHealth > 0
               ? (unit.health / unit.maxHealth) * 100
               : 0;
-            const isAttacking = isPlayer && unit.attackTargetId;
+            const isAttacking = isOwned && unit.attackTargetId;
 
             return (
               <div
@@ -708,7 +808,7 @@ export default function Home() {
 
                 {/* Unit shape */}
                 <div className={`absolute flex items-center justify-center left-1/2 top-1/2 h-7 w-7 text-[8px] font-extrabold leading-none -translate-x-1/2 -translate-y-1/2 shadow-inner ${
-                  isEnemy 
+                  unit.owner === "red" 
                     ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-50 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
                     : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-50 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
                 } ${unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
@@ -721,7 +821,7 @@ export default function Home() {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
                     const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
-                    const radius = isEnemy ? 14 : 12;
+                    const radius = unit.owner !== playerColor ? 14 : 12;
                     return (
                       <div
                         className="absolute left-1/2 top-1/2"
@@ -750,7 +850,7 @@ export default function Home() {
           ═══════════════════════════════════════════════════════════════════ */}
       <div className="absolute left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-end gap-[3px]" style={{ bottom: 185 }}>
         {Object.entries(controlGroups).sort(([a],[b]) => a.localeCompare(b)).map(([key, ids]) => {
-          const validUnits = ids.map(id => units.find(u => u.id === id && u.owner === 'player' && u.health > 0)).filter(Boolean);
+          const validUnits = ids.map(id => units.find(u => u.id === id && u.owner === playerColor && u.health > 0)).filter(Boolean);
           if (validUnits.length === 0) return null;
           const displayUnit = validUnits[0];
           const displayInfo = UNIT_DISPLAY_INFO[displayUnit.variantId] || { shortLabel: '?' };
@@ -781,7 +881,7 @@ export default function Home() {
              >
                <div className="relative w-[34px] h-[34px] bg-gradient-to-b from-[#18283a] to-[#0c141d] border border-[#2a4563] rounded shadow-[0_4px_12px_rgba(0,0,0,0.8)] transition-all group-hover:border-cyan-400/80 xl:group-hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] flex items-center justify-center mb-[3px]">
                  {/* Unit Icon inside the box */}
-                 <div className={`w-[22px] h-[22px] flex items-center justify-center text-[10px] font-black leading-none bg-gradient-to-br from-green-400 to-green-600 text-green-50 shadow-[0_0_10px_rgba(74,222,128,0.5)] ${displayUnit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
+                 <div className={`w-[22px] h-[22px] flex items-center justify-center text-[10px] font-black leading-none ${playerColor === 'red' ? 'from-rose-400 to-rose-600 shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'from-green-400 to-green-600 shadow-[0_0_10px_rgba(74,222,128,0.5)]'} bg-gradient-to-br text-white ${displayUnit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
                    {displayInfo.shortLabel}
                  </div>
                  {/* Count Badge */}
@@ -873,9 +973,9 @@ export default function Home() {
                        height: `${(windowSize.height / MAP_HEIGHT) * 100}%` 
                      }} />
                 {units.map(unit => {
-                  const isEnemy = unit.owner === "enemy";
+                  const isOpponent = unit.owner !== playerColor;
                   return (
-                    <div key={unit.id} className={`absolute w-[5px] h-[5px] rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-75 ${isEnemy ? 'bg-rose-500 shadow-[0_0_4px_rgba(244,63,94,0.8)]' : 'bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.8)]'}`}
+                    <div key={unit.id} className={`absolute w-[5px] h-[5px] rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-75 ${unit.owner === 'red' ? 'bg-rose-500 shadow-[0_0_4px_rgba(244,63,94,0.8)]' : 'bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.8)]'}`}
                          style={{ left: `${(unit.x / MAP_WIDTH) * 100}%`, top: `${(unit.y / MAP_HEIGHT) * 100}%` }} />
                   );
                 })}
@@ -904,18 +1004,18 @@ export default function Home() {
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div className="relative">
                     {/* Portrait frame */}
-                    <div className="w-[90px] h-[90px] rounded-lg border-2 border-cyan-500/50 bg-gradient-to-br from-[#0d1a2a] to-[#061018] flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.15),inset_0_0_30px_rgba(0,0,0,0.5)]">
+                    <div className={`w-[90px] h-[90px] rounded-lg border-2 ${selectedUnit.owner === 'red' ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.15)]' : 'border-cyan-500/50 shadow-[0_0_20px_rgba(6,182,212,0.15)]'} bg-gradient-to-br from-[#0d1a2a] to-[#061018] flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.5)]`}>
                       <div className={`w-14 h-14 flex items-center justify-center text-xl font-black ${
                         selectedUnit.variantId === "rifleman" ? "rounded-full" : "rounded-md"
-                      } border-2 border-cyan-300/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-white shadow-[0_0_25px_rgba(34,211,238,0.6)]`}>
+                      } border-2 ${selectedUnit.owner === 'red' ? 'border-rose-300/60 bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_25px_rgba(244,63,94,0.6)]' : 'border-cyan-300/60 bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_0_25px_rgba(34,211,238,0.6)]'} text-white`}>
                         {selectedUnitDisplay.shortLabel}
                       </div>
                     </div>
                     {/* Corner decorations */}
-                    <div className="absolute -top-0.5 -left-0.5 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/70" />
-                    <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/70" />
-                    <div className="absolute -bottom-0.5 -left-0.5 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-400/70" />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 border-b-2 border-r-2 border-cyan-400/70" />
+                    <div className={`absolute -top-0.5 -left-0.5 w-2.5 h-2.5 border-t-2 border-l-2 ${selectedUnit.owner === 'red' ? 'border-rose-400/70' : 'border-cyan-400/70'}`} />
+                    <div className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 border-t-2 border-r-2 ${selectedUnit.owner === 'red' ? 'border-rose-400/70' : 'border-cyan-400/70'}`} />
+                    <div className={`absolute -bottom-0.5 -left-0.5 w-2.5 h-2.5 border-b-2 border-l-2 ${selectedUnit.owner === 'red' ? 'border-rose-400/70' : 'border-cyan-400/70'}`} />
+                    <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 border-b-2 border-r-2 ${selectedUnit.owner === 'red' ? 'border-rose-400/70' : 'border-cyan-400/70'}`} />
                   </div>
                   {/* HP bar below portrait */}
                   <div className="mt-2 w-[90px]">
@@ -1034,13 +1134,13 @@ export default function Home() {
                       <button
                         key={unitId}
                         onClick={() => setSelectedUnitIds([unitId])}
-                        className="relative flex flex-col items-center cursor-pointer rounded-md border border-cyan-800/40 bg-[#0a1520]/80 hover:border-cyan-400/60 hover:bg-[#0d1a2a] transition-all group"
+                        className={`relative flex flex-col items-center cursor-pointer rounded-md border ${unit.owner === 'red' ? 'border-rose-800/40 hover:border-rose-400/60' : 'border-cyan-800/40 hover:border-cyan-400/60'} bg-[#0a1520]/80 hover:bg-[#0d1a2a] transition-all group`}
                         style={{ width: 52, height: 60 }}
                         title={`${display.name} — ${Math.ceil(unit.health)}/${unit.maxHealth} HP`}
                       >
                         {/* Unit icon */}
                         <div className="flex-1 flex items-center justify-center pt-1">
-                          <div className={`w-7 h-7 flex items-center justify-center text-[8px] font-extrabold leading-none border border-cyan-200/50 bg-gradient-to-br from-cyan-400 to-cyan-600 text-white shadow-[0_0_10px_rgba(34,211,238,0.3)] group-hover:shadow-[0_0_14px_rgba(34,211,238,0.5)] transition-shadow ${
+                          <div className={`w-7 h-7 flex items-center justify-center text-[8px] font-extrabold leading-none border ${unit.owner === 'red' ? 'border-rose-200/50 from-rose-400 to-rose-600 shadow-[0_0_10px_rgba(244,63,94,0.3)] group-hover:shadow-[0_0_14px_rgba(244,63,94,0.5)]' : 'border-cyan-200/50 from-cyan-400 to-cyan-600 shadow-[0_0_10px_rgba(34,211,238,0.3)] group-hover:shadow-[0_0_14px_rgba(34,211,238,0.5)]'} bg-gradient-to-br text-white transition-shadow ${
                             unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"
                           }`}>
                             {display.shortLabel}
@@ -1166,7 +1266,84 @@ export default function Home() {
           100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
         }
       `}} />
+      {!playerColor && (
+        <ColorChooserModal 
+          onJoin={handleJoinTeam} 
+          teamSelections={teamSelections} 
+        />
+      )}
     </main>
+  );
+}
+
+function ColorChooserModal({ onJoin, teamSelections }) {
+  const blueTaken = teamSelections.blue?.socketId && teamSelections.blue?.isOnline;
+  const redTaken = teamSelections.red?.socketId && teamSelections.red?.isOnline;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl">
+      <div className="relative max-w-2xl w-full p-8 rounded-2xl border border-white/10 bg-[#0f1722]/90 shadow-2xl overflow-hidden">
+        {/* Decorative background element */}
+        <div className="absolute -top-24 -left-24 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="relative text-center mb-10">
+          <p className="text-xs uppercase tracking-[0.4em] text-cyan-400 font-bold mb-2">Initialize Session</p>
+          <h2 className="text-4xl font-bold text-white tracking-tight">Deployment Authorization</h2>
+          <p className="text-slate-400 mt-4 max-w-md mx-auto">Select your command frequency to assume control of battalion assets. Multiple commanders cannot share the same frequency.</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-8">
+          {/* Blue Team Selection */}
+          <button
+            disabled={blueTaken}
+            onClick={() => onJoin('blue')}
+            className={`group relative flex flex-col items-center p-8 rounded-xl border-2 transition-all duration-300 ${
+              blueTaken 
+                ? 'border-slate-800 bg-slate-900/50 opacity-50 cursor-not-allowed' 
+                : 'border-cyan-500/20 bg-cyan-500/5 hover:border-cyan-400 hover:bg-cyan-500/10 hover:shadow-[0_0_30px_rgba(34,211,238,0.2)]'
+            }`}
+          >
+            <div className={`w-20 h-20 rounded-full mb-6 flex items-center justify-center border-2 transition-transform group-hover:scale-110 ${
+              blueTaken ? 'border-slate-700 bg-slate-800 text-slate-600' : 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+            }`}>
+              <span className="text-3xl font-black">B</span>
+            </div>
+            <h3 className={`text-xl font-bold mb-2 ${blueTaken ? 'text-slate-600' : 'text-cyan-100'}`}>BLUE OPS</h3>
+            <p className="text-xs text-slate-500 uppercase tracking-widest">{blueTaken ? 'Channel Occupied' : 'Signal Available'}</p>
+            {!blueTaken && (
+              <div className="absolute inset-0 rounded-xl border border-cyan-400/0 group-hover:border-cyan-400/50 transition-colors" />
+            )}
+          </button>
+
+          {/* Red Team Selection */}
+          <button
+            disabled={redTaken}
+            onClick={() => onJoin('red')}
+            className={`group relative flex flex-col items-center p-8 rounded-xl border-2 transition-all duration-300 ${
+              redTaken 
+                ? 'border-slate-800 bg-slate-900/50 opacity-50 cursor-not-allowed' 
+                : 'border-rose-500/20 bg-rose-500/5 hover:border-rose-400 hover:bg-rose-500/10 hover:shadow-[0_0_30px_rgba(244,63,94,0.2)]'
+            }`}
+          >
+            <div className={`w-20 h-20 rounded-full mb-6 flex items-center justify-center border-2 transition-transform group-hover:scale-110 ${
+              redTaken ? 'border-slate-700 bg-slate-800 text-slate-600' : 'border-rose-400 bg-rose-500/20 text-rose-300'
+            }`}>
+              <span className="text-3xl font-black">R</span>
+            </div>
+            <h3 className={`text-xl font-bold mb-2 ${redTaken ? 'text-slate-600' : 'text-rose-100'}`}>RED OPS</h3>
+            <p className="text-xs text-slate-500 uppercase tracking-widest">{redTaken ? 'Channel Occupied' : 'Signal Available'}</p>
+            {!redTaken && (
+              <div className="absolute inset-0 rounded-xl border border-rose-400/0 group-hover:border-rose-400/50 transition-colors" />
+            )}
+          </button>
+        </div>
+
+        <div className="mt-10 pt-8 border-t border-white/5 text-center">
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest">Awaiting Command Input...</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1186,7 +1363,7 @@ function normalizeSelection(selection) {
   };
 }
 
-function getUnitsInSelection(units, selection) {
+function getUnitsInSelection(units, selection, playerColor) {
   const bounds = normalizeSelection(selection);
   const isClickSelection =
     bounds.width < 4 &&
@@ -1202,7 +1379,7 @@ function getUnitsInSelection(units, selection) {
       return [];
     }
 
-    const playerUnits = clickedUnits.filter(u => u.owner === "player");
+    const playerUnits = clickedUnits.filter(u => u.owner === playerColor);
     if (playerUnits.length > 0) {
       return playerUnits.map((unit) => unit.id);
     }
@@ -1214,7 +1391,7 @@ function getUnitsInSelection(units, selection) {
   // Box selection: only select player units.
   return units
     .filter((unit) => {
-      if (unit.owner !== "player") {
+      if (unit.owner !== playerColor) {
         return false;
       }
 
