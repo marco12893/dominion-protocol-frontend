@@ -9,7 +9,7 @@ const UNIT_SELECTION_RADIUS = 12;
 const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:10000";
-const STARTING_RESOURCES = 3000;
+const STARTING_RESOURCES = 5000;
 
 const INITIAL_UNITS = [];
 
@@ -78,6 +78,8 @@ export default function Home() {
     red: { socketId: null, isOnline: false, hasDeployed: false }
   });
   const [notifications, setNotifications] = useState([]);
+  const [visualProjectiles, setVisualProjectiles] = useState([]);
+  const [visualEffects, setVisualEffects] = useState([]);
 
   const addNotification = (message, type = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -277,6 +279,76 @@ export default function Home() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  // Cleanup visual effects (sparks, flashes)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisualEffects(prev => {
+        const now = Date.now();
+        const next = prev.filter(e => now - e.timestamp < 250);
+        return next.length !== prev.length ? next : prev;
+      });
+    }, 50);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Projectile tracking logic (Local Client-Side)
+  const unitsRef = useRef(units);
+  useEffect(() => { unitsRef.current = units; }, [units]);
+
+  useEffect(() => {
+    let animationFrameId;
+    let lastTime = performance.now();
+
+    function updateProjectiles(time) {
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+
+      if (dt > 0) {
+        setVisualProjectiles(prev => {
+          if (prev.length === 0) return prev;
+          
+          const next = [];
+          const currentUnits = unitsRef.current;
+ 
+          for (const p of prev) {
+            const target = currentUnits.find(u => u.id === p.targetId && u.health > 0);
+            
+            // If target is dead/gone, we go to its last known position
+            const tx = target ? target.x : (p.lastTargetPos?.x ?? p.currentX);
+            const ty = target ? target.y : (p.lastTargetPos?.y ?? p.currentY);
+ 
+            const dx = tx - p.currentX;
+            const dy = ty - p.currentY;
+            const dist = Math.hypot(dx, dy);
+ 
+            // Impact check
+            if (dist < 12) {
+              continue; 
+            }
+ 
+            const step = p.speed * dt;
+            const move = Math.min(dist, step);
+            
+            next.push({
+              ...p,
+              currentX: p.currentX + (dx / dist) * move,
+              currentY: p.currentY + (dy / dist) * move,
+              angle: Math.atan2(dy, dx),
+              lastTargetPos: target ? { x: target.x, y: target.y } : p.lastTargetPos
+            });
+          }
+ 
+          return next;
+        });
+      }
+
+      animationFrameId = requestAnimationFrame(updateProjectiles);
+    }
+
+    animationFrameId = requestAnimationFrame(updateProjectiles);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
+
   useEffect(() => {
     const socket = io(SOCKET_URL, {
       transports: ["websocket"],
@@ -296,6 +368,24 @@ export default function Home() {
       setPlayerColor(null);
       setSelectedUnitIds([]);
       setControlGroups({});
+      setVisualProjectiles([]);
+      setVisualEffects([]);
+    });
+
+    socket.on("unit:attack", (data) => {
+      if (data.variantId === "lightTank") {
+        setVisualEffects(prev => [...prev, 
+          { id: `${data.id}-flash`, type: 'flash', shooterId: data.unitId, timestamp: Date.now() }
+        ]);
+      }
+    });
+
+    socket.on("unit:shootProjectile", (projectile) => {
+      setVisualProjectiles(prev => [...prev, {
+        ...projectile,
+        currentX: projectile.startX,
+        currentY: projectile.startY,
+      }]);
     });
 
     socket.on("world:state", (state) => {
@@ -840,8 +930,8 @@ export default function Home() {
                   {UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?"}
                 </div>
 
-                {/* Muzzle flash */}
-                {unit.isFiring && (
+                {/* Continuous muzzle flash (Rifleman, Armored Car) */}
+                {unit.isFiring && unit.variantId !== "antiTank" && unit.variantId !== "lightTank" && (
                   (() => {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
@@ -864,9 +954,58 @@ export default function Home() {
                     );
                   })()
                 )}
+
+                {/* Discrete muzzle flash (Light Tank) */}
+                {visualEffects.some(e => e.type === 'flash' && e.shooterId === unit.id) && (
+                  (() => {
+                    const target = units.find(u => u.id === unit.attackTargetId);
+                    if (!target) return null;
+                    const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
+                    const radius = 14; 
+                    return (
+                      <div
+                        className="absolute left-1/2 top-1/2"
+                        style={{
+                          transform: `translate(-50%, -50%) rotate(${angle}rad) translateX(${radius + 4}px)`,
+                        }}
+                      >
+                        <div
+                          className="h-3 w-8 rounded-full bg-orange-300 shadow-[0_0_25px_rgba(255,165,0,1)]"
+                          style={{
+                             animation: "discrete-flash 0.15s ease-out forwards",
+                          }}
+                        />
+                      </div>
+                    );
+                  })()
+                )}
               </div>
             );
           })}
+
+          {/* Hitscan Visual Effects (Sparks/Flashes) */}
+          {/* Note: Sparks removed for Light Tank per user request */}
+
+          {/* Visual Projectiles (Missiles) */}
+          {visualProjectiles.map(p => (
+            <div 
+              key={p.id}
+              className="absolute pointer-events-none"
+              style={{
+                left: p.currentX,
+                top: p.currentY,
+                transform: `translate(-50%, -50%) rotate(${p.angle || 0}rad)`,
+                zIndex: 40
+              }}
+            >
+              {/* Missile Body */}
+              <div className="w-4 h-1.5 bg-gradient-to-r from-orange-400 to-yellow-200 rounded-sm shadow-[0_0_12px_rgba(251,146,60,0.9)]" />
+              {/* Engine Glow */}
+              <div className="absolute right-full top-1/2 -translate-y-1/2 w-3 h-3 bg-orange-500 rounded-full blur-[4px] animate-pulse" />
+              {/* Smoke Trail */}
+              <div className="absolute right-full top-1/2 -translate-y-1/2 w-12 h-2 bg-gradient-to-r from-transparent via-white/10 to-orange-500/30 blur-[2px]" />
+            </div>
+          ))}
         </div>
       </div>
 
@@ -1351,6 +1490,27 @@ export default function Home() {
         @keyframes pulse-marker {
           0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
           100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+        @keyframes explosion {
+          0% { transform: scale(0.1); opacity: 1; }
+          100% { transform: scale(2.5); opacity: 0; }
+        }
+        @keyframes explosion-core {
+          0% { transform: scale(0.1); opacity: 1; }
+          50% { transform: scale(1.4); opacity: 0.5; }
+          100% { transform: scale(3); opacity: 0; }
+        }
+        @keyframes explosion-ring {
+          0% { transform: scale(0.2); opacity: 1; border-width: 4px; }
+          100% { transform: scale(3.5); opacity: 0; border-width: 0px; }
+        }
+        @keyframes discrete-flash {
+          0% { transform: scale(0.5); opacity: 1; }
+          100% { transform: scale(1.5); opacity: 0; }
+        }
+        @keyframes spark {
+          0% { transform: scale(0.2); opacity: 1; }
+          100% { transform: scale(1.4); opacity: 0; }
         }
       `}} />
       {!playerColor && (
