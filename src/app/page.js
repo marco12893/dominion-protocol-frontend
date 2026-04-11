@@ -33,6 +33,18 @@ const UNIT_DISPLAY_INFO = {
     attributes: ["Light", "Infantry"],
     damageDescription: "AT Missile",
   },
+  armoredCar: {
+    name: "Armored Car",
+    shortLabel: "AC",
+    attributes: ["Armored", "Vehicle"],
+    damageDescription: "20mm Autocannon",
+  },
+  lightTank: {
+    name: "Light Tank",
+    shortLabel: "LT",
+    attributes: ["Armored", "Vehicle"],
+    damageDescription: "75mm Cannon",
+  },
   armoredDummy: {
     name: "Armored Dummy",
     shortLabel: "A",
@@ -807,12 +819,17 @@ export default function Home() {
                 />
 
                 {/* Unit shape */}
-                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 h-7 w-7 text-[8px] font-extrabold leading-none -translate-x-1/2 -translate-y-1/2 shadow-inner ${
+                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 text-[8px] font-black leading-none -translate-x-1/2 -translate-y-1/2 shadow-inner transition-all ${
                   unit.owner === "red" 
                     ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-50 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
                     : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-50 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
-                } ${unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"}`}>
-                  {unit.variantId === "rifleman" ? "R" : unit.variantId === "antiTank" ? "AT" : unit.variantId === "armoredDummy" ? "A" : ""}
+                } ${
+                  unit.variantId === "rifleman" ? "h-7 w-7 rounded-full" : 
+                  unit.variantId === "antiTank" ? "h-7 w-7 rounded-full" : 
+                  unit.variantId === "armoredCar" ? "h-8 w-8 rounded-md" :
+                  unit.variantId === "lightTank" ? "h-9 w-10 rounded-none" : "h-7 w-7 rounded-sm"
+                }`}>
+                  {UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?"}
                 </div>
 
                 {/* Muzzle flash */}
@@ -1006,7 +1023,10 @@ export default function Home() {
                     {/* Portrait frame */}
                     <div className={`w-[90px] h-[90px] rounded-lg border-2 ${selectedUnit.owner === 'red' ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.15)]' : 'border-cyan-500/50 shadow-[0_0_20px_rgba(6,182,212,0.15)]'} bg-gradient-to-br from-[#0d1a2a] to-[#061018] flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.5)]`}>
                       <div className={`w-14 h-14 flex items-center justify-center text-xl font-black ${
-                        selectedUnit.variantId === "rifleman" ? "rounded-full" : "rounded-md"
+                        selectedUnit.variantId === "rifleman" ? "rounded-full" : 
+                        selectedUnit.variantId === "antiTank" ? "rounded-full" : 
+                        selectedUnit.variantId === "armoredCar" ? "rounded-md" : 
+                        selectedUnit.variantId === "lightTank" ? "rounded-none" : "rounded-sm"
                       } border-2 ${selectedUnit.owner === 'red' ? 'border-rose-300/60 bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_25px_rgba(244,63,94,0.6)]' : 'border-cyan-300/60 bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_0_25px_rgba(34,211,238,0.6)]'} text-white`}>
                         {selectedUnitDisplay.shortLabel}
                       </div>
