@@ -66,8 +66,20 @@ export default function Home() {
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [hoveredTooltip, setHoveredTooltip] = useState(null);
   const [controlGroups, setControlGroups] = useState({});
+  const [orderMarkers, setOrderMarkers] = useState([]);
   const lastDigitKeyPressRef = useRef({});
   const latestStateRef = useRef({});
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOrderMarkers(prev => {
+        const now = Date.now();
+        const next = prev.filter(m => now - m.timestamp < 350);
+        return next.length !== prev.length ? next : prev;
+      });
+    }, 50);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     latestStateRef.current = { controlGroups, units, windowSize };
@@ -99,12 +111,12 @@ export default function Home() {
       } else if (e.key.toLowerCase() === "s") {
         setIsAttackMoveMode(false);
         if (selectedUnitIds.length > 0) {
-          socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds });
+          socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds, isQueued: e.shiftKey });
         }
       } else if (e.key.toLowerCase() === "h") {
         setIsAttackMoveMode(false);
         if (selectedUnitIds.length > 0) {
-          socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds });
+          socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds, isQueued: e.shiftKey });
         }
       } else if (e.key === "Escape") {
         setIsAttackMoveMode(false);
@@ -306,6 +318,7 @@ export default function Home() {
       socketRef.current?.emit("unit:attack", {
         unitIds: selectedUnitIds,
         targetId: clickedEnemy.id,
+        isQueued: event.shiftKey
       });
       return;
     }
@@ -313,7 +326,9 @@ export default function Home() {
     socketRef.current?.emit("unit:move", {
       unitIds: selectedUnitIds,
       position: clickPoint,
+      isQueued: event.shiftKey
     });
+    setOrderMarkers(prev => [...prev, { x: clickPoint.x, y: clickPoint.y, type: 'move', id: Math.random(), timestamp: Date.now() }]);
   }
 
   useEffect(() => {
@@ -374,7 +389,9 @@ export default function Home() {
       socketRef.current?.emit("unit:attackMove", {
         unitIds: selectedUnitIds,
         position: start,
+        isQueued: event.shiftKey
       });
+      setOrderMarkers(prev => [...prev, { x: start.x, y: start.y, type: 'attackMove', id: Math.random(), timestamp: Date.now() }]);
       setIsAttackMoveMode(false);
       return;
     }
@@ -543,6 +560,61 @@ export default function Home() {
         >
           {/* Map borders decorative */}
           <div className="absolute inset-0 border-[4px] border-cyan-900/40 pointer-events-none" />
+
+          {/* Queued paths lines */}
+          <svg className="absolute inset-0 pointer-events-none" width={MAP_WIDTH} height={MAP_HEIGHT} style={{ zIndex: 10 }}>
+            {selectedUnitIds.map(unitId => {
+              const u = units.find(unit => unit.id === unitId);
+              if (!u || !u.orderQueue || u.orderQueue.length === 0) return null;
+              
+              let points = [{ x: u.x, y: u.y }];
+              if (u.isMoving) points.push({ x: u.destinationX, y: u.destinationY });
+
+              u.orderQueue.forEach(order => {
+                if (order.position) points.push(order.position);
+                else if (order.type === 'attack' && order.targetId) {
+                  const target = units.find(e => e.id === order.targetId);
+                  if (target) points.push({x: target.x, y: target.y});
+                }
+              });
+
+              if (points.length < 2) return null;
+              
+              const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ');
+
+              return (
+                <polyline 
+                  key={`queue-${u.id}`}
+                  points={pointsStr}
+                  fill="none"
+                  stroke={u.orderQueue[0].type === 'attackMove' || u.orderQueue[0].type === 'attack' ? "rgba(244, 63, 94, 0.5)" : "rgba(74, 222, 128, 0.5)"}
+                  strokeWidth="1.5"
+                  strokeDasharray="4 4"
+                />
+              );
+            })}
+          </svg>
+
+          {/* Transient Order Markers */}
+          {orderMarkers.map(marker => (
+            <div 
+              key={marker.id}
+              className={`absolute border-[2px] rounded-full flex items-center justify-center`}
+              style={{
+                left: marker.x, 
+                top: marker.y, 
+                width: 24, 
+                height: 24, 
+                transform: 'translate(-50%, -50%) scale(1)', 
+                borderColor: marker.type === 'move' ? 'rgba(74,222,128,0.8)' : 'rgba(244,63,94,0.8)',
+                pointerEvents: 'none',
+                zIndex: 15,
+                animation: 'pulse-marker 0.35s ease-out forwards'
+              }}
+            >
+               <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: marker.type === 'move' ? '#4ade80' : '#f43f5e' }}></div>
+            </div>
+          ))}
 
           {obstacles.map((obstacle) => (
             <div
@@ -1033,13 +1105,13 @@ export default function Home() {
                 <span className="text-[8px] mt-0.5 font-bold tracking-wide text-slate-400">A</span>
               </button>
 
-              {/* Stop command */}
+               {/* Stop command */}
               <button
                 id="cmd-stop-btn"
-                onClick={() => {
+                onClick={(e) => {
                   setIsAttackMoveMode(false);
                   if (selectedUnitIds.length > 0) {
-                    socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds });
+                    socketRef.current?.emit("unit:stop", { unitIds: selectedUnitIds, isQueued: e.shiftKey });
                   }
                 }}
                 className="relative w-full aspect-square rounded-md border border-slate-600/50 bg-slate-800/70 flex flex-col items-center justify-center cursor-pointer transition-all hover:border-cyan-500/50 hover:bg-slate-700/70"
@@ -1053,10 +1125,10 @@ export default function Home() {
               {/* Hold Position command */}
               <button
                 id="cmd-hold-btn"
-                onClick={() => {
+                onClick={(e) => {
                   setIsAttackMoveMode(false);
                   if (selectedUnitIds.length > 0) {
-                    socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds });
+                    socketRef.current?.emit("unit:holdPosition", { unitIds: selectedUnitIds, isQueued: e.shiftKey });
                   }
                 }}
                 className={`relative w-full aspect-square rounded-md border flex flex-col items-center justify-center cursor-pointer transition-all ${
@@ -1088,6 +1160,10 @@ export default function Home() {
         @keyframes muzzle-flash {
           0% { opacity: 0; transform: scaleX(0.4); }
           100% { opacity: 1; transform: scaleX(1.5); }
+        }
+        @keyframes pulse-marker {
+          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
         }
       `}} />
     </main>
