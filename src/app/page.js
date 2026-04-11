@@ -9,7 +9,7 @@ const UNIT_SELECTION_RADIUS = 12;
 const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:10000";
-const STARTING_RESOURCES = 5000;
+const STARTING_RESOURCES = 3000;
 
 const INITIAL_UNITS = [];
 
