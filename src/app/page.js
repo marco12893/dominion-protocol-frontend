@@ -1116,17 +1116,30 @@ function getUnitsInSelection(units, selection) {
     bounds.width < 4 &&
     bounds.height < 4;
 
+  if (isClickSelection) {
+    const clickedUnits = units.filter((unit) =>
+      Math.abs(unit.x - selection.currentX) <= UNIT_SELECTION_RADIUS &&
+      Math.abs(unit.y - selection.currentY) <= UNIT_SELECTION_RADIUS
+    );
+
+    if (clickedUnits.length === 0) {
+      return [];
+    }
+
+    const playerUnits = clickedUnits.filter(u => u.owner === "player");
+    if (playerUnits.length > 0) {
+      return playerUnits.map((unit) => unit.id);
+    }
+    
+    // If no player units, select exactly one enemy unit
+    return [clickedUnits[0].id];
+  }
+
+  // Box selection: only select player units.
   return units
     .filter((unit) => {
       if (unit.owner !== "player") {
         return false;
-      }
-
-      if (isClickSelection) {
-        return (
-          Math.abs(unit.x - selection.currentX) <= UNIT_SELECTION_RADIUS &&
-          Math.abs(unit.y - selection.currentY) <= UNIT_SELECTION_RADIUS
-        );
       }
 
       return (
