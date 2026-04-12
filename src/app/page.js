@@ -62,7 +62,14 @@ const UNIT_DISPLAY_INFO = {
     shortLabel: "F",
     attributes: ["Air", "Plane"],
     damageDescription: "Twin Machine Guns",
-    cost: 650,
+    cost: 1000,
+  },
+  antiAir: {
+    name: "Anti-Air",
+    shortLabel: "AA",
+    attributes: ["Armored", "Vehicle"],
+    damageDescription: "AA Missiles",
+    cost: 600,
   },
 };
 
@@ -937,6 +944,7 @@ export default function Home() {
                     unit.variantId === "antiTank" ? "h-7 w-7 rounded-full" : 
                     unit.variantId === "armoredCar" ? "h-8 w-8 rounded-md" :
                     unit.variantId === "lightTank" ? "h-9 w-10 rounded-none" : 
+                    unit.variantId === "antiAir" ? "h-9 w-9 rounded-sm" :
                     unit.variantId === "fighter" ? "h-14 w-12 shadow-[0_0_25px_rgba(255,255,255,0.2)]" : "h-7 w-7 rounded-sm"
                   }`}
                   style={{
@@ -947,11 +955,18 @@ export default function Home() {
                   {unit.variantId === "fighter" && (
                     <div className="absolute top-[35%] right-[20%] w-[25%] h-[30%] bg-cyan-200/60 rounded-full shadow-[0_0_10px_rgba(165,243,252,0.8)]" />
                   )}
-                  {unit.variantId !== "fighter" && (UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?")}
+                  {unit.variantId === "antiAir" && (
+                    <div className="absolute inset-x-2 bottom-1 h-3 bg-white/20 border border-white/30 rounded-t-sm" />
+                  )}
+                  {unit.variantId !== "fighter" && (
+                    <div className={unit.variantId === "antiAir" ? "absolute top-1" : ""}>
+                      {UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?"}
+                    </div>
+                  )}
                 </div>
 
                 {/* Continuous muzzle flash (Rifleman, Armored Car) */}
-                {unit.isFiring && unit.variantId !== "antiTank" && unit.variantId !== "lightTank" && (
+                {unit.isFiring && unit.variantId !== "antiTank" && unit.variantId !== "lightTank" && unit.variantId !== "antiAir" && (
                   (() => {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
@@ -1027,25 +1042,24 @@ export default function Home() {
                 </div>
               );
             }
-            return (
-              <div 
-                key={p.id}
-                className="absolute pointer-events-none"
-                style={{
-                  left: p.currentX,
-                  top: p.currentY,
-                  transform: `translate(-50%, -50%) rotate(${p.angle || 0}rad)`,
-                  zIndex: 40
-                }}
-              >
-                {/* Missile Body */}
-                <div className="w-4 h-1.5 bg-gradient-to-r from-orange-400 to-yellow-200 rounded-sm shadow-[0_0_12px_rgba(251,146,60,0.9)]" />
-                {/* Engine Glow */}
-                <div className="absolute right-full top-1/2 -translate-y-1/2 w-3 h-3 bg-orange-500 rounded-full blur-[4px] animate-pulse" />
-                {/* Smoke Trail */}
-                <div className="absolute right-full top-1/2 -translate-y-1/2 w-12 h-2 bg-gradient-to-r from-transparent via-white/10 to-orange-500/30 blur-[2px]" />
-              </div>
-            );
+
+            if (p.variantId === "aa_missile" || p.variantId === "antiTank_missile") {
+              return (
+                <div
+                  key={p.id}
+                  className="absolute pointer-events-none z-40"
+                  style={{
+                    left: p.currentX,
+                    top: p.currentY,
+                    transform: `translate(-50%, -50%) rotate(${p.angle}rad)`,
+                  }}
+                >
+                  <div className={`h-1.5 w-4 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.8)] ${p.variantId === "aa_missile" ? "bg-cyan-300" : "bg-orange-400"}`} />
+                  <div className="absolute right-full top-1/2 -translate-y-1/2 w-8 h-1 bg-gradient-to-r from-transparent to-white/40 blur-[2px]" />
+                </div>
+              );
+            }
+            return null;
           })}
         </div>
       </div>
@@ -1717,7 +1731,8 @@ function UnitSelectionModal({ playerColor, onDeploy }) {
     antiTank: 0,
     armoredCar: 0,
     lightTank: 0,
-    fighter: 0
+    fighter: 0,
+    antiAir: 0
   });
 
   const totalCost = Object.entries(quantities).reduce((acc, [id, qty]) => {
