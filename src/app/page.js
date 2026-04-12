@@ -9,7 +9,7 @@ const UNIT_SELECTION_RADIUS = 12;
 const UNIT_CLICK_RADIUS = 14;
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:10000";
-const STARTING_RESOURCES = 3000;
+const STARTING_RESOURCES = 8000;
 
 const INITIAL_UNITS = [];
 
@@ -50,12 +50,12 @@ const UNIT_DISPLAY_INFO = {
     damageDescription: "75mm Cannon",
     cost: 850,
   },
-  armoredDummy: {
-    name: "Armored Dummy",
-    shortLabel: "A",
-    attributes: ["Armored", "Mechanical"],
-    damageDescription: "None",
-    cost: 1000,
+  heavyTank: {
+    name: "Heavy Tank",
+    shortLabel: "HT",
+    attributes: ["Armored", "Vehicle heavy"],
+    damageDescription: "120mm Heavy Cannon",
+    cost: 1600,
   },
   fighter: {
     name: "Fighter",
@@ -70,6 +70,13 @@ const UNIT_DISPLAY_INFO = {
     attributes: ["Armored", "Vehicle"],
     damageDescription: "AA Missiles",
     cost: 600,
+  },
+  attackHelicopter: {
+    name: "Attack Helicopter",
+    shortLabel: "AH",
+    attributes: ["Air", "Helicopter"],
+    damageDescription: "M134 Minigun",
+    cost: 700,
   },
 };
 
@@ -387,7 +394,7 @@ export default function Home() {
     });
 
     socket.on("unit:attack", (data) => {
-      if (data.variantId === "lightTank") {
+      if (data.variantId === "lightTank" || data.variantId === "heavyTank") {
         setVisualEffects(prev => [...prev, 
           { id: `${data.id}-flash`, type: 'flash', shooterId: data.unitId, timestamp: Date.now() }
         ]);
@@ -430,6 +437,9 @@ export default function Home() {
             attackTargetId: unit.attackTargetId,
             isFiring: unit.isFiring,
             isHoldingPosition: !!unit.isHoldingPosition,
+            angle: unit.angle ?? 0,
+            isPlane: !!unit.isPlane,
+            isHelicopter: !!unit.isHelicopter,
             speed: unit.speed ?? 0,
             damageModifiers: unit.damageModifiers ?? {},
           })),
@@ -886,7 +896,7 @@ export default function Home() {
                   top: `${unit.y}px`,
                   width: 0,
                   height: 0,
-                  zIndex: unit.isPlane ? 60 : isSelected ? 50 : 30, // Planes on top
+                  zIndex: (unit.isPlane || unit.isHelicopter) ? 60 : isSelected ? 50 : 30, // Air units on top
                   transition: "left 0.1s linear, top 0.1s linear"
                 }}
               >
@@ -944,7 +954,9 @@ export default function Home() {
                     unit.variantId === "antiTank" ? "h-7 w-7 rounded-full" : 
                     unit.variantId === "armoredCar" ? "h-8 w-8 rounded-md" :
                     unit.variantId === "lightTank" ? "h-9 w-10 rounded-none" : 
+                    unit.variantId === "heavyTank" ? "h-11 w-13 rounded-none shadow-[0_0_20px_rgba(0,0,0,0.4)]" :
                     unit.variantId === "antiAir" ? "h-9 w-9 rounded-sm" :
+                    unit.variantId === "attackHelicopter" ? "h-10 w-10 rounded-full border-dashed" :
                     unit.variantId === "fighter" ? "h-14 w-12 shadow-[0_0_25px_rgba(255,255,255,0.2)]" : "h-7 w-7 rounded-sm"
                   }`}
                   style={{
@@ -965,13 +977,13 @@ export default function Home() {
                   )}
                 </div>
 
-                {/* Continuous muzzle flash (Rifleman, Armored Car) */}
+                {/* Continuous muzzle flash (Rifleman, Armored Car, AH) */}
                 {unit.isFiring && unit.variantId !== "antiTank" && unit.variantId !== "lightTank" && unit.variantId !== "antiAir" && (
                   (() => {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
                     const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
-                    const radius = unit.owner !== playerColor ? 14 : 12;
+                    const radius = unit.isHelicopter ? 18 : (unit.owner !== playerColor ? 14 : 12);
                     return (
                       <div
                         className="absolute left-1/2 top-1/2"
@@ -990,13 +1002,13 @@ export default function Home() {
                   })()
                 )}
 
-                {/* Discrete muzzle flash (Light Tank) */}
+                {/* Discrete muzzle flash (Light/Heavy Tank) */}
                 {visualEffects.some(e => e.type === 'flash' && e.shooterId === unit.id) && (
                   (() => {
                     const target = units.find(u => u.id === unit.attackTargetId);
                     if (!target) return null;
                     const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
-                    const radius = 14; 
+                    const radius = unit.variantId === "heavyTank" ? 18 : 14; 
                     return (
                       <div
                         className="absolute left-1/2 top-1/2"
@@ -1422,7 +1434,7 @@ export default function Home() {
                         {/* Unit icon */}
                         <div className="flex-1 flex items-center justify-center pt-1">
                           <div className={`w-7 h-7 flex items-center justify-center text-[8px] font-extrabold leading-none border ${unit.owner === 'red' ? 'border-rose-200/50 from-rose-400 to-rose-600 shadow-[0_0_10px_rgba(244,63,94,0.3)] group-hover:shadow-[0_0_14px_rgba(244,63,94,0.5)]' : 'border-cyan-200/50 from-cyan-400 to-cyan-600 shadow-[0_0_10px_rgba(34,211,238,0.3)] group-hover:shadow-[0_0_14px_rgba(34,211,238,0.5)]'} bg-gradient-to-br text-white transition-shadow ${
-                            unit.variantId === "rifleman" ? "rounded-full" : "rounded-sm"
+                            unit.variantId === "rifleman" || unit.variantId === "attackHelicopter" ? "rounded-full" : "rounded-sm"
                           }`}>
                             {display.shortLabel}
                           </div>
@@ -1732,7 +1744,9 @@ function UnitSelectionModal({ playerColor, onDeploy }) {
     armoredCar: 0,
     lightTank: 0,
     fighter: 0,
-    antiAir: 0
+    antiAir: 0,
+    attackHelicopter: 0,
+    heavyTank: 0
   });
 
   const totalCost = Object.entries(quantities).reduce((acc, [id, qty]) => {
