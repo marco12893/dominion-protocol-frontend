@@ -57,6 +57,13 @@ const UNIT_DISPLAY_INFO = {
     damageDescription: "None",
     cost: 1000,
   },
+  fighter: {
+    name: "Fighter",
+    shortLabel: "F",
+    attributes: ["Air", "Plane"],
+    damageDescription: "Twin Machine Guns",
+    cost: 650,
+  },
 };
 
 export default function Home() {
@@ -866,10 +873,14 @@ export default function Home() {
             return (
               <div
                 key={unit.id}
-                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-75 ease-linear"
+                className="pointer-events-none absolute"
                 style={{
                   left: `${unit.x}px`,
                   top: `${unit.y}px`,
+                  width: 0,
+                  height: 0,
+                  zIndex: unit.isPlane ? 60 : isSelected ? 50 : 30, // Planes on top
+                  transition: "left 0.1s linear, top 0.1s linear"
                 }}
               >
                 {/* Health bar */}
@@ -904,30 +915,39 @@ export default function Home() {
                 </div>
 
                 {/* Selection ring */}
-                <span
-                  className={`absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all ${
-                    isSelected
-                      ? "border-amber-300/80 shadow-[0_0_15px_rgba(252,211,77,0.4)] scale-100 opacity-100"
-                      : unit.isHoldingPosition
-                        ? "border-cyan-400/60 border-dashed shadow-[0_0_12px_rgba(34,211,238,0.3)] scale-100 opacity-100"
-                        : isAttacking
-                          ? "border-rose-400/60 shadow-[0_0_12px_rgba(244,63,94,0.3)] scale-100 opacity-100"
-                          : "border-transparent scale-50 opacity-0"
-                  }`}
+                <div
+                  className={`absolute h-10 w-10 rounded-full border transition-all`}
+                  style={{
+                    transform: 'translate(-50%, -50%)',
+                    borderColor: isSelected ? 'rgba(252,211,77,0.8)' : unit.isHoldingPosition ? 'rgba(34,211,238,0.4)' : isAttacking ? 'rgba(244,63,94,0.4)' : 'transparent',
+                    boxShadow: isSelected ? '0 0 15px rgba(252,211,77,0.4)' : 'none',
+                    opacity: isSelected || unit.isHoldingPosition || isAttacking ? 1 : 0,
+                    scale: isSelected || unit.isHoldingPosition || isAttacking ? 1 : 0.5
+                  }}
                 />
 
                 {/* Unit shape */}
-                <div className={`absolute flex items-center justify-center left-1/2 top-1/2 text-[8px] font-black leading-none -translate-x-1/2 -translate-y-1/2 shadow-inner transition-all ${
-                  unit.owner === "red" 
-                    ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-50 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
-                    : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-50 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
-                } ${
-                  unit.variantId === "rifleman" ? "h-7 w-7 rounded-full" : 
-                  unit.variantId === "antiTank" ? "h-7 w-7 rounded-full" : 
-                  unit.variantId === "armoredCar" ? "h-8 w-8 rounded-md" :
-                  unit.variantId === "lightTank" ? "h-9 w-10 rounded-none" : "h-7 w-7 rounded-sm"
-                }`}>
-                  {UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?"}
+                <div 
+                  className={`absolute flex items-center justify-center text-[8px] font-black leading-none shadow-inner ${
+                    unit.owner === "red" 
+                      ? 'border border-rose-300/60 bg-gradient-to-br from-rose-500 to-rose-700 text-rose-50 shadow-[0_0_20px_rgba(244,63,94,0.6)]' 
+                      : 'border border-cyan-200/60 bg-gradient-to-br from-cyan-400 to-cyan-600 text-cyan-50 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
+                  } ${
+                    unit.variantId === "rifleman" ? "h-7 w-7 rounded-full" : 
+                    unit.variantId === "antiTank" ? "h-7 w-7 rounded-full" : 
+                    unit.variantId === "armoredCar" ? "h-8 w-8 rounded-md" :
+                    unit.variantId === "lightTank" ? "h-9 w-10 rounded-none" : 
+                    unit.variantId === "fighter" ? "h-14 w-12 shadow-[0_0_25px_rgba(255,255,255,0.2)]" : "h-7 w-7 rounded-sm"
+                  }`}
+                  style={{
+                    transform: `translate(-50%, -50%) rotate(${(unit.angle ?? 0) * (180 / Math.PI)}deg)`,
+                    clipPath: unit.variantId === "fighter" ? "polygon(100% 50%, 0% 0%, 25% 50%, 0% 100%)" : "none",
+                  }}
+                >
+                  {unit.variantId === "fighter" && (
+                    <div className="absolute top-[35%] right-[20%] w-[25%] h-[30%] bg-cyan-200/60 rounded-full shadow-[0_0_10px_rgba(165,243,252,0.8)]" />
+                  )}
+                  {unit.variantId !== "fighter" && (UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?")}
                 </div>
 
                 {/* Continuous muzzle flash (Rifleman, Armored Car) */}
@@ -986,26 +1006,47 @@ export default function Home() {
           {/* Hitscan Visual Effects (Sparks/Flashes) */}
           {/* Note: Sparks removed for Light Tank per user request */}
 
-          {/* Visual Projectiles (Missiles) */}
-          {visualProjectiles.map(p => (
-            <div 
-              key={p.id}
-              className="absolute pointer-events-none"
-              style={{
-                left: p.currentX,
-                top: p.currentY,
-                transform: `translate(-50%, -50%) rotate(${p.angle || 0}rad)`,
-                zIndex: 40
-              }}
-            >
-              {/* Missile Body */}
-              <div className="w-4 h-1.5 bg-gradient-to-r from-orange-400 to-yellow-200 rounded-sm shadow-[0_0_12px_rgba(251,146,60,0.9)]" />
-              {/* Engine Glow */}
-              <div className="absolute right-full top-1/2 -translate-y-1/2 w-3 h-3 bg-orange-500 rounded-full blur-[4px] animate-pulse" />
-              {/* Smoke Trail */}
-              <div className="absolute right-full top-1/2 -translate-y-1/2 w-12 h-2 bg-gradient-to-r from-transparent via-white/10 to-orange-500/30 blur-[2px]" />
-            </div>
-          ))}
+          {/* Visual Projectiles (Missiles & Bullets) */}
+          {visualProjectiles.map(p => {
+            if (p.variantId === "fighter_bullet") {
+              return (
+                <div 
+                  key={p.id}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: p.currentX,
+                    top: p.currentY,
+                    transform: `translate(-50%, -50%) rotate(${p.angle || 0}rad)`,
+                    zIndex: 40
+                  }}
+                >
+                  <div className="flex flex-col gap-[10px]">
+                    <div className="w-6 h-px bg-white/30 shadow-[0_0_4px_rgba(255,255,255,0.4)]" />
+                    <div className="w-6 h-px bg-white/30 shadow-[0_0_4px_rgba(255,255,255,0.4)]" />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div 
+                key={p.id}
+                className="absolute pointer-events-none"
+                style={{
+                  left: p.currentX,
+                  top: p.currentY,
+                  transform: `translate(-50%, -50%) rotate(${p.angle || 0}rad)`,
+                  zIndex: 40
+                }}
+              >
+                {/* Missile Body */}
+                <div className="w-4 h-1.5 bg-gradient-to-r from-orange-400 to-yellow-200 rounded-sm shadow-[0_0_12px_rgba(251,146,60,0.9)]" />
+                {/* Engine Glow */}
+                <div className="absolute right-full top-1/2 -translate-y-1/2 w-3 h-3 bg-orange-500 rounded-full blur-[4px] animate-pulse" />
+                {/* Smoke Trail */}
+                <div className="absolute right-full top-1/2 -translate-y-1/2 w-12 h-2 bg-gradient-to-r from-transparent via-white/10 to-orange-500/30 blur-[2px]" />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1675,7 +1716,8 @@ function UnitSelectionModal({ playerColor, onDeploy }) {
     rifleman: 0,
     antiTank: 0,
     armoredCar: 0,
-    lightTank: 0
+    lightTank: 0,
+    fighter: 0
   });
 
   const totalCost = Object.entries(quantities).reduce((acc, [id, qty]) => {
@@ -1771,7 +1813,7 @@ function UnitSelectionModal({ playerColor, onDeploy }) {
         <div className="mt-auto pt-8 border-t border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-8">
             <div className="text-blue-200/40 text-xs italic max-w-xs">
-              "Tactical efficiency depends on a balanced force. Ensure you have enough infantry to screen your heavy assets."
+              &quot;Tactical efficiency depends on a balanced force. Ensure you have enough infantry to screen your heavy assets.&quot;
             </div>
           </div>
           
