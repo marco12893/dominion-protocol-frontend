@@ -101,6 +101,7 @@ export default function Home() {
   const [notifications, setNotifications] = useState([]);
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [visualEffects, setVisualEffects] = useState([]);
+  const [hoveredUnitId, setHoveredUnitId] = useState(null);
 
   const addNotification = (message, type = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -145,7 +146,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    latestStateRef.current = { controlGroups, units, windowSize };
+    latestStateRef.current = { controlGroups, units, windowSize, camera, playerColor };
   });
   
   useEffect(() => {
@@ -247,10 +248,32 @@ export default function Home() {
     };
   }, [selectedUnitIds]);
 
-  // Mouse tracking for edge pan
+  // Mouse tracking for edge pan and hover detection
   useEffect(() => {
     function handleMouseMove(e) {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
+
+      const state = latestStateRef.current;
+      if (!state.units || !state.camera) return;
+
+      const mapX = e.clientX + state.camera.x;
+      const mapY = e.clientY + state.camera.y;
+
+      // Detect unit under mouse
+      let foundId = null;
+      // Reverse loop to pick units on top (higher z-index) if overlapping
+      for (let i = state.units.length - 1; i >= 0; i--) {
+        const unit = state.units[i];
+        if (unit.health <= 0) continue;
+        const dist = Math.hypot(unit.x - mapX, unit.y - mapY);
+        // Using UNIT_CLICK_RADIUS for a generous hover feel
+        if (dist <= UNIT_CLICK_RADIUS) {
+          foundId = unit.id;
+          break;
+        }
+      }
+
+      setHoveredUnitId(prev => (prev !== foundId ? foundId : prev));
     }
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
@@ -943,6 +966,18 @@ export default function Home() {
                   }}
                 />
 
+                {/* Hover ring (SC2 style) */}
+                {hoveredUnitId === unit.id && !isSelected && (
+                  <div
+                    className="absolute h-11 w-11 rounded-full border-[3px] border-dotted animate-pulse-bold"
+                    style={{
+                      transform: 'translate(-50%, -50%)',
+                      borderColor: unit.owner === playerColor ? 'rgba(252,211,77,0.9)' : 'rgba(244,63,94,0.9)',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                )}
+
                 {/* Unit shape */}
                 <div 
                   className={`absolute flex items-center justify-center text-[8px] font-black leading-none shadow-inner ${
@@ -1578,6 +1613,14 @@ export default function Home() {
         @keyframes spark {
           0% { transform: scale(0.2); opacity: 1; }
           100% { transform: scale(1.4); opacity: 0; }
+        }
+        @keyframes pulse-bold {
+          0% { opacity: 0.5; transform: translate(-50%, -50%) scale(0.96); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+          100% { opacity: 0.5; transform: translate(-50%, -50%) scale(0.96); }
+        }
+        .animate-pulse-bold {
+          animation: pulse-bold 1.2s ease-in-out infinite;
         }
       `}} />
       {!playerColor && (
