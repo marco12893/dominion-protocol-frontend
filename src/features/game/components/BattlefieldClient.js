@@ -47,6 +47,16 @@ export default function BattlefieldClient() {
   const prevTeamSelectionsRef = useRef(INITIAL_TEAM_SELECTIONS);
   const unitsByIdRef = useRef(new Map());
 
+  // High-frequency refs for rendering loop
+  const unitsRef = useRef(INITIAL_UNITS);
+  const visualProjectilesRef = useRef([]);
+  const visualEffectsRef = useRef([]);
+  const cameraRef = useRef({ x: 0, y: 0 });
+  const selectedUnitIdsRef = useRef([]);
+
+  // Throttled UI state (updated at lower frequency)
+  const [uiTick, setUiTick] = useState(0);
+
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [controlGroups, setControlGroups] = useState({});
   const [hoveredTooltip, setHoveredTooltip] = useState(null);
@@ -65,6 +75,7 @@ export default function BattlefieldClient() {
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+
   const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
   const opponentColor = playerColor === "blue" ? "red" : "blue";
@@ -79,6 +90,35 @@ export default function BattlefieldClient() {
       windowSize,
     };
   }, [camera, controlGroups, playerColor, selectedUnitIds, units, windowSize]);
+
+  // Sync refs with state
+  useEffect(() => {
+    cameraRef.current = camera;
+  }, [camera]);
+
+  useEffect(() => {
+    selectedUnitIdsRef.current = selectedUnitIds;
+  }, [selectedUnitIds]);
+
+  useEffect(() => {
+    unitsRef.current = units;
+  }, [units]);
+
+  useEffect(() => {
+    visualProjectilesRef.current = visualProjectiles;
+  }, [visualProjectiles]);
+
+  useEffect(() => {
+    visualEffectsRef.current = visualEffects;
+  }, [visualEffects]);
+
+  // Throttled UI state update (10fps for HUD/Overlays)
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setUiTick((tick) => tick + 1);
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     unitsByIdRef.current = new Map(units.map((unit) => [unit.id, unit]));
@@ -327,13 +367,15 @@ export default function BattlefieldClient() {
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setVisualEffects((current) => {
-        const now = Date.now();
-        const next = current.filter(
-          (effect) => now - effect.timestamp < (effect.duration ?? 250),
-        );
-        return next.length !== current.length ? next : current;
-      });
+      const current = visualEffectsRef.current;
+      const now = Date.now();
+      const next = current.filter(
+        (effect) => now - effect.timestamp < (effect.duration ?? 250),
+      );
+      if (next.length !== current.length) {
+        visualEffectsRef.current = next;
+        setVisualEffects(next);
+      }
     }, 50);
 
     return () => window.clearInterval(interval);
@@ -348,11 +390,8 @@ export default function BattlefieldClient() {
       lastTime = time;
 
       if (deltaTime > 0) {
-        setVisualProjectiles((current) => {
-          if (current.length === 0) {
-            return current;
-          }
-
+        const current = visualProjectilesRef.current;
+        if (current.length > 0) {
           const next = [];
 
           for (const projectile of current) {
@@ -392,8 +431,9 @@ export default function BattlefieldClient() {
             });
           }
 
-          return next;
-        });
+          visualProjectilesRef.current = next;
+          setVisualProjectiles(next);
+        }
       }
 
       animationFrameId = requestAnimationFrame(updateProjectiles);
@@ -412,49 +452,50 @@ export default function BattlefieldClient() {
     socket.on("game:reset", () => {
       setPlayerColor(null);
       setSelectedUnitIds([]);
+      selectedUnitIdsRef.current = [];
       setControlGroups({});
       setUnits(INITIAL_UNITS);
+      unitsRef.current = INITIAL_UNITS;
       setObstacles(INITIAL_OBSTACLES);
       setTeamSelections(INITIAL_TEAM_SELECTIONS);
       setVisualProjectiles([]);
+      visualProjectilesRef.current = [];
       setVisualEffects([]);
+      visualEffectsRef.current = [];
       prevTeamSelectionsRef.current = INITIAL_TEAM_SELECTIONS;
     });
     socket.on("unit:attack", (data) => {
       if (data.variantId === "lightTank" || data.variantId === "heavyTank") {
-        setVisualEffects((current) => [
-          ...current,
-          {
-            id: `${data.id}-flash`,
-            type: "flash",
-            shooterId: data.unitId,
-            timestamp: Date.now(),
-          },
-        ]);
+        const newEffect = {
+          id: `${data.id}-flash`,
+          type: "flash",
+          shooterId: data.unitId,
+          timestamp: Date.now(),
+        };
+        visualEffectsRef.current = [...visualEffectsRef.current, newEffect];
+        setVisualEffects((current) => [...current, newEffect]);
       } else if (data.variantId === "bomber" && data.targetPos) {
-        setVisualEffects((current) => [
-          ...current,
-          {
-            id: `${data.id}-explosion`,
-            type: "explosion",
-            x: data.targetPos.x,
-            y: data.targetPos.y,
-            radius: data.splashRadius ?? 95,
-            timestamp: Date.now(),
-            duration: 450,
-          },
-        ]);
+        const newEffect = {
+          id: `${data.id}-explosion`,
+          type: "explosion",
+          x: data.targetPos.x,
+          y: data.targetPos.y,
+          radius: data.splashRadius ?? 95,
+          timestamp: Date.now(),
+          duration: 450,
+        };
+        visualEffectsRef.current = [...visualEffectsRef.current, newEffect];
+        setVisualEffects((current) => [...current, newEffect]);
       }
     });
     socket.on("unit:shootProjectile", (projectile) => {
-      setVisualProjectiles((current) => [
-        ...current,
-        {
-          ...projectile,
-          currentX: projectile.startX,
-          currentY: projectile.startY,
-        },
-      ]);
+      const newProjectile = {
+        ...projectile,
+        currentX: projectile.startX,
+        currentY: projectile.startY,
+      };
+      visualProjectilesRef.current = [...visualProjectilesRef.current, newProjectile];
+      setVisualProjectiles((current) => [...current, newProjectile]);
     });
     function applyTeamSelections(nextTeamSelections) {
       if (!nextTeamSelections) {
@@ -487,7 +528,9 @@ export default function BattlefieldClient() {
         setObstacles(snapshot.obstacles);
       }
       if (Array.isArray(snapshot?.units)) {
-        setUnits(snapshot.units.map(normalizeWorldUnit));
+        const normalizedUnits = snapshot.units.map(normalizeWorldUnit);
+        setUnits(normalizedUnits);
+        unitsRef.current = normalizedUnits;
       }
     });
 
@@ -498,7 +541,11 @@ export default function BattlefieldClient() {
         setObstacles(delta.obstacles);
       }
       if (Array.isArray(delta?.units) || Array.isArray(delta?.removedUnitIds)) {
-        setUnits((currentUnits) => applyWorldDelta(currentUnits, delta));
+        setUnits((currentUnits) => {
+          const nextUnits = applyWorldDelta(currentUnits, delta);
+          unitsRef.current = nextUnits;
+          return nextUnits;
+        });
       }
     });
 
@@ -747,6 +794,7 @@ export default function BattlefieldClient() {
 
       <BattlefieldWorld
         camera={camera}
+        cameraRef={cameraRef}
         hoveredUnitId={hoveredUnitId}
         isAttackMoveMode={isAttackMoveMode}
         obstacles={obstacles}
@@ -756,10 +804,14 @@ export default function BattlefieldClient() {
         orderMarkers={orderMarkers}
         playerColor={playerColor}
         selectedUnitIds={selectedUnitIds}
+        selectedUnitIdsRef={selectedUnitIdsRef}
         selectionBounds={selectionBounds}
         units={units}
+        unitsRef={unitsRef}
         visualEffects={visualEffects}
+        visualEffectsRef={visualEffectsRef}
         visualProjectiles={visualProjectiles}
+        visualProjectilesRef={visualProjectilesRef}
         windowSize={windowSize}
       />
 

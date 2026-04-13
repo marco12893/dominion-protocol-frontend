@@ -498,6 +498,7 @@ function drawVisualEffects(ctx, visualEffects, camera) {
 
 export default function BattlefieldWorld({
   camera,
+  cameraRef,
   hoveredUnitId,
   isAttackMoveMode,
   obstacles,
@@ -507,14 +508,26 @@ export default function BattlefieldWorld({
   orderMarkers,
   playerColor,
   selectedUnitIds,
+  selectedUnitIdsRef,
   selectionBounds,
   units,
+  unitsRef,
   visualEffects,
+  visualEffectsRef,
   visualProjectiles,
+  visualProjectilesRef,
   windowSize,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const unitsByIdRef = useRef(new Map());
+  const selectedUnitIdSetRef = useRef(new Set());
+  const flashShooterIdsRef = useRef(new Set());
+  const lastUnitsRef = useRef(null);
+  const lastSelectedUnitIdsRef = useRef(null);
+  const lastVisualEffectsRef = useRef(null);
+  const groundUnitsRef = useRef([]);
+  const airUnitsRef = useRef([]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -529,91 +542,114 @@ export default function BattlefieldWorld({
       return undefined;
     }
 
-    const viewportWidth = container.clientWidth;
-    const viewportHeight = container.clientHeight;
-    const dpr = window.devicePixelRatio || 1;
-    const targetWidth = Math.max(1, Math.floor(viewportWidth * dpr));
-    const targetHeight = Math.max(1, Math.floor(viewportHeight * dpr));
+    let animationFrameId;
+    let lastViewportWidth = 0;
+    let lastViewportHeight = 0;
 
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      canvas.style.width = `${viewportWidth}px`;
-      canvas.style.height = `${viewportHeight}px`;
-    }
+    function render() {
+      const viewportWidth = container.clientWidth;
+      const viewportHeight = container.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const targetWidth = Math.max(1, Math.floor(viewportWidth * dpr));
+      const targetHeight = Math.max(1, Math.floor(viewportHeight * dpr));
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, viewportWidth, viewportHeight);
-
-    drawBackground(ctx, camera, viewportWidth, viewportHeight);
-
-    const unitsById = new Map(units.map((unit) => [unit.id, unit]));
-    const selectedUnitIdSet = new Set(selectedUnitIds);
-    const flashShooterIds = new Set(
-      visualEffects
-        .filter((effect) => effect.type === "flash")
-        .map((effect) => effect.shooterId),
-    );
-
-    drawOrderLines(ctx, selectedUnitIds, unitsById, camera);
-    drawObstacles(ctx, obstacles, camera, viewportWidth, viewportHeight);
-    drawOrderMarkers(ctx, orderMarkers, camera);
-
-    const groundUnits = [];
-    const airUnits = [];
-    for (const unit of units) {
-      const radius = unit.isPlane || unit.isHelicopter ? 36 : 28;
-      const screenX = unit.x - camera.x;
-      const screenY = unit.y - camera.y;
-
-      if (!isVisible(screenX - radius, screenY - radius, radius * 2, radius * 2, viewportWidth, viewportHeight)) {
-        continue;
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight || 
+          lastViewportWidth !== viewportWidth || lastViewportHeight !== viewportHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.style.width = `${viewportWidth}px`;
+        canvas.style.height = `${viewportHeight}px`;
+        lastViewportWidth = viewportWidth;
+        lastViewportHeight = viewportHeight;
       }
 
-      if (unit.isPlane || unit.isHelicopter) {
-        airUnits.push(unit);
-      } else {
-        groundUnits.push(unit);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, viewportWidth, viewportHeight);
+
+      // Read from refs for high-frequency data
+      const currentCamera = cameraRef.current;
+      const currentUnits = unitsRef.current;
+      const currentVisualProjectiles = visualProjectilesRef.current;
+      const currentVisualEffects = visualEffectsRef.current;
+      const currentSelectedUnitIds = selectedUnitIdsRef.current;
+
+      drawBackground(ctx, currentCamera, viewportWidth, viewportHeight);
+
+      // Only rebuild Map/Set when underlying arrays change
+      if (currentUnits !== lastUnitsRef.current) {
+        unitsByIdRef.current = new Map(currentUnits.map((unit) => [unit.id, unit]));
+        lastUnitsRef.current = currentUnits;
       }
-    }
-
-    for (const unit of [...groundUnits, ...airUnits]) {
-      drawUnit(ctx, unit, {
-        camera,
-        hoveredUnitId,
-        playerColor,
-        selectedUnitIdSet,
-        unitsById,
-        flashShooterIds,
-      });
-    }
-
-    for (const projectile of visualProjectiles) {
-      const x = projectile.currentX - camera.x;
-      const y = projectile.currentY - camera.y;
-
-      if (!isVisible(x - 20, y - 20, 40, 40, viewportWidth, viewportHeight, 24)) {
-        continue;
+      if (currentSelectedUnitIds !== lastSelectedUnitIdsRef.current) {
+        selectedUnitIdSetRef.current = new Set(currentSelectedUnitIds);
+        lastSelectedUnitIdsRef.current = currentSelectedUnitIds;
+      }
+      if (currentVisualEffects !== lastVisualEffectsRef.current) {
+        flashShooterIdsRef.current = new Set(
+          currentVisualEffects
+            .filter((effect) => effect.type === "flash")
+            .map((effect) => effect.shooterId),
+        );
+        lastVisualEffectsRef.current = currentVisualEffects;
       }
 
-      drawProjectile(ctx, projectile, camera);
+      drawOrderLines(ctx, currentSelectedUnitIds, unitsByIdRef.current, currentCamera);
+      drawObstacles(ctx, obstacles, currentCamera, viewportWidth, viewportHeight);
+      drawOrderMarkers(ctx, orderMarkers, currentCamera);
+
+      // Reuse arrays to avoid allocations
+      groundUnitsRef.current.length = 0;
+      airUnitsRef.current.length = 0;
+      const groundUnits = groundUnitsRef.current;
+      const airUnits = airUnitsRef.current;
+      
+      for (const unit of currentUnits) {
+        const radius = unit.isPlane || unit.isHelicopter ? 36 : 28;
+        const screenX = unit.x - currentCamera.x;
+        const screenY = unit.y - currentCamera.y;
+
+        if (!isVisible(screenX - radius, screenY - radius, radius * 2, radius * 2, viewportWidth, viewportHeight)) {
+          continue;
+        }
+
+        if (unit.isPlane || unit.isHelicopter) {
+          airUnits.push(unit);
+        } else {
+          groundUnits.push(unit);
+        }
+      }
+
+      for (const unit of [...groundUnits, ...airUnits]) {
+        drawUnit(ctx, unit, {
+          camera: currentCamera,
+          hoveredUnitId,
+          playerColor,
+          selectedUnitIdSet: selectedUnitIdSetRef.current,
+          unitsById: unitsByIdRef.current,
+          flashShooterIds: flashShooterIdsRef.current,
+        });
+      }
+
+      for (const projectile of currentVisualProjectiles) {
+        const x = projectile.currentX - currentCamera.x;
+        const y = projectile.currentY - currentCamera.y;
+
+        if (!isVisible(x - 20, y - 20, 40, 40, viewportWidth, viewportHeight, 24)) {
+          continue;
+        }
+
+        drawProjectile(ctx, projectile, currentCamera);
+      }
+
+      drawVisualEffects(ctx, currentVisualEffects, currentCamera);
+      drawSelectionBounds(ctx, selectionBounds, currentCamera);
+
+      animationFrameId = requestAnimationFrame(render);
     }
 
-    drawVisualEffects(ctx, visualEffects, camera);
-    drawSelectionBounds(ctx, selectionBounds, camera);
-  }, [
-    camera,
-    hoveredUnitId,
-    obstacles,
-    orderMarkers,
-    playerColor,
-    selectedUnitIds,
-    selectionBounds,
-    units,
-    visualEffects,
-    visualProjectiles,
-    windowSize,
-  ]);
+    animationFrameId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [cameraRef, unitsRef, visualProjectilesRef, visualEffectsRef, selectedUnitIdsRef, obstacles, orderMarkers, playerColor, hoveredUnitId, selectionBounds]);
 
   return (
     <div
