@@ -9,6 +9,8 @@ export default function SelectionPanel({
   selectedUnitIds,
   units,
 }) {
+  const unitsById = new Map(units.map((unit) => [unit.id, unit]));
+
   if (selectedUnit && selectedUnitDisplay) {
     const healthRatio =
       selectedUnit.maxHealth > 0 ? selectedUnit.health / selectedUnit.maxHealth : 0;
@@ -314,7 +316,7 @@ export default function SelectionPanel({
             style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(100,116,139,0.3) transparent" }}
           >
             {selectedUnitIds.map((unitId) => {
-              const unit = units.find((entry) => entry.id === unitId);
+              const unit = unitsById.get(unitId);
               if (!unit) {
                 return null;
               }

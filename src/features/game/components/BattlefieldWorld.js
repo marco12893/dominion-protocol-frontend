@@ -62,13 +62,13 @@ function ProjectileSprite({ projectile }) {
 function UnitSprite({
   hoveredUnitId,
   playerColor,
-  selectedUnitIds,
+  selectedUnitIdSet,
   unit,
-  units,
+  unitsById,
   visualEffects,
 }) {
   const isOwned = unit.owner === playerColor;
-  const isSelected = isOwned && selectedUnitIds.includes(unit.id);
+  const isSelected = isOwned && selectedUnitIdSet.has(unit.id);
   const healthPercent = unit.maxHealth > 0 ? (unit.health / unit.maxHealth) * 100 : 0;
   const isAttacking = isOwned && unit.attackTargetId;
 
@@ -200,7 +200,7 @@ function UnitSprite({
         unit.variantId !== "antiAir" &&
         unit.variantId !== "bomber" &&
         (() => {
-          const target = units.find((entry) => entry.id === unit.attackTargetId);
+          const target = unitsById.get(unit.attackTargetId);
           if (!target) return null;
           const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
           const radius = unit.isHelicopter ? 18 : unit.owner !== playerColor ? 14 : 12;
@@ -222,7 +222,7 @@ function UnitSprite({
 
       {visualEffects.some((effect) => effect.type === "flash" && effect.shooterId === unit.id) &&
         (() => {
-          const target = units.find((entry) => entry.id === unit.attackTargetId);
+          const target = unitsById.get(unit.attackTargetId);
           if (!target) return null;
           const angle = Math.atan2(target.y - unit.y, target.x - unit.x);
           const radius = unit.variantId === "heavyTank" ? 18 : 14;
@@ -261,6 +261,9 @@ export default function BattlefieldWorld({
   visualEffects,
   visualProjectiles,
 }) {
+  const unitsById = new Map(units.map((unit) => [unit.id, unit]));
+  const selectedUnitIdSet = new Set(selectedUnitIds);
+
   return (
     <div
       onDoubleClick={onDoubleClick}
@@ -284,7 +287,7 @@ export default function BattlefieldWorld({
 
         <svg className="absolute inset-0 pointer-events-none" width={MAP_WIDTH} height={MAP_HEIGHT} style={{ zIndex: 10 }}>
           {selectedUnitIds.map((unitId) => {
-            const unit = units.find((entry) => entry.id === unitId);
+            const unit = unitsById.get(unitId);
             if (!unit?.orderQueue?.length) return null;
 
             const points = [{ x: unit.x, y: unit.y }];
@@ -296,7 +299,7 @@ export default function BattlefieldWorld({
               if (order.position) {
                 points.push(order.position);
               } else if (order.type === "attack" && order.targetId) {
-                const target = units.find((entry) => entry.id === order.targetId);
+                const target = unitsById.get(order.targetId);
                 if (target) points.push({ x: target.x, y: target.y });
               }
             });
@@ -377,9 +380,9 @@ export default function BattlefieldWorld({
             key={unit.id}
             hoveredUnitId={hoveredUnitId}
             playerColor={playerColor}
-            selectedUnitIds={selectedUnitIds}
+            selectedUnitIdSet={selectedUnitIdSet}
             unit={unit}
-            units={units}
+            unitsById={unitsById}
             visualEffects={visualEffects}
           />
         ))}

@@ -63,6 +63,7 @@ export default function BattlefieldClient() {
   const [visualEffects, setVisualEffects] = useState([]);
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
   const opponentColor = playerColor === "blue" ? "red" : "blue";
 
@@ -677,12 +678,11 @@ export default function BattlefieldClient() {
   }
 
   const selectionBounds = selectionBox ? normalizeSelection(selectionBox) : null;
-  const selectedUnit =
-    selectedUnitIds.length === 1 ? units.find((unit) => unit.id === selectedUnitIds[0]) : null;
+  const selectedUnit = selectedUnitIds.length === 1 ? unitsById.get(selectedUnitIds[0]) : null;
   const selectedUnitDisplay = getUnitDisplay(selectedUnit);
   const allSelectedHoldingPosition =
     selectedUnitIds.length > 0 &&
-    selectedUnitIds.every((id) => units.find((unit) => unit.id === id)?.isHoldingPosition);
+    selectedUnitIds.every((id) => unitsById.get(id)?.isHoldingPosition);
   const opponentDisconnected =
     !!playerColor &&
     !!teamSelections[opponentColor]?.socketId &&
