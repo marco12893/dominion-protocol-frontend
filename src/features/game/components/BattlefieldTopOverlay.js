@@ -1,0 +1,111 @@
+export default function BattlefieldTopOverlay({
+  isConnected,
+  notifications,
+  onReset,
+  opponentDisconnected,
+  playerColor,
+}) {
+  return (
+    <>
+      <div className="absolute top-4 left-4 z-50 pointer-events-auto flex flex-col gap-3 max-w-xs">
+        <div className="rounded-xl border border-white/10 bg-[#0f1722]/80 backdrop-blur-md p-4 shadow-2xl">
+          <p className="text-[10px] uppercase tracking-[0.35em] text-cyan-400 font-bold">
+            Dominion Protocol
+          </p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-white drop-shadow-md">
+            RTS Prototype
+          </h1>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-[#0f1722]/70 backdrop-blur-sm p-3 text-xs shadow-xl">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Connection</span>
+            <span
+              className={`flex items-center gap-1.5 ${
+                isConnected ? "text-emerald-400" : "text-amber-400"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isConnected ? "bg-emerald-400" : "bg-amber-400"
+                } animate-pulse`}
+              />
+              {isConnected ? "Online" : "Offline"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-3 pointer-events-none">
+        {playerColor && (
+          <div
+            className={`px-6 py-2 rounded-full border-2 bg-slate-900/90 backdrop-blur-md shadow-2xl flex items-center gap-3 transition-all duration-500 scale-in-center ${
+              playerColor === "red"
+                ? "border-rose-500/50 shadow-rose-500/20"
+                : "border-cyan-500/50 shadow-cyan-500/20"
+            }`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full animate-pulse ${
+                playerColor === "red" ? "bg-rose-500" : "bg-cyan-500"
+              }`}
+            />
+            <span className="text-[10px] uppercase tracking-[0.3em] font-black text-white">
+              Commanding:{" "}
+              <span className={playerColor === "red" ? "text-rose-400" : "text-cyan-400"}>
+                {playerColor} Ops
+              </span>
+            </span>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          {notifications.map((notification) => (
+            <div
+              key={notification.id}
+              className={`px-4 py-2 rounded border bg-slate-950/90 backdrop-blur-sm shadow-xl flex items-center gap-3 animate-notification ${
+                notification.type === "red"
+                  ? "border-rose-500/30"
+                  : notification.type === "blue"
+                    ? "border-cyan-500/30"
+                    : "border-white/10"
+              }`}
+            >
+              <div
+                className={`w-1.5 h-1.5 rounded-full ${
+                  notification.type === "red"
+                    ? "bg-rose-500"
+                    : notification.type === "blue"
+                      ? "bg-cyan-500"
+                      : "bg-white"
+                }`}
+              />
+              <span className="text-[10px] font-bold tracking-widest text-slate-100 uppercase">
+                {notification.message}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="absolute top-4 right-4 z-[60] flex flex-col items-end gap-3 pointer-events-auto">
+        <button
+          id="reset-player-btn"
+          onClick={onReset}
+          className="px-5 py-2 rounded border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all backdrop-blur-md flex items-center gap-2"
+        >
+          <span>☣</span> Global Reset
+        </button>
+
+        {opponentDisconnected && playerColor && (
+          <div className="px-4 py-1.5 bg-rose-600/20 border border-rose-500/50 rounded backdrop-blur-md animate-pulse">
+            <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-2">
+              <span className="text-sm">⚠</span> Opponent Disconnected
+            </p>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
