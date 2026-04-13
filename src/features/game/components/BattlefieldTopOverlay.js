@@ -4,6 +4,8 @@ export default function BattlefieldTopOverlay({
   onReset,
   opponentDisconnected,
   playerColor,
+  isFullscreen,
+  onToggleFullscreen,
 }) {
   return (
     <>
@@ -89,13 +91,32 @@ export default function BattlefieldTopOverlay({
       </div>
 
       <div className="absolute top-4 right-4 z-[60] flex flex-col items-end gap-3 pointer-events-auto">
-        <button
-          id="reset-player-btn"
-          onClick={onReset}
-          className="px-5 py-2 rounded border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all backdrop-blur-md flex items-center gap-2"
-        >
-          <span>☣</span> Global Reset
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            id="fullscreen-toggle-btn"
+            onClick={onToggleFullscreen}
+            className="p-2.5 rounded border border-white/10 bg-[#0f1722]/80 hover:bg-[#1a2635] text-cyan-400/80 hover:text-cyan-400 transition-all backdrop-blur-md flex items-center justify-center shadow-xl group"
+            title={isFullscreen ? "Exit Fullscreen (f)" : "Enter Fullscreen (f)"}
+          >
+            {isFullscreen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
+                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
+                <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            )}
+          </button>
+
+          <button
+            id="reset-player-btn"
+            onClick={onReset}
+            className="px-5 py-2.5 rounded border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all backdrop-blur-md flex items-center gap-2 shadow-xl"
+          >
+            <span>☣</span> Global Reset
+          </button>
+        </div>
 
         {opponentDisconnected && playerColor && (
           <div className="px-4 py-1.5 bg-rose-600/20 border border-rose-500/50 rounded backdrop-blur-md animate-pulse">

@@ -64,6 +64,7 @@ export default function BattlefieldClient() {
   const [visualEffects, setVisualEffects] = useState([]);
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
   const opponentColor = playerColor === "blue" ? "red" : "blue";
@@ -123,6 +124,24 @@ export default function BattlefieldClient() {
   }, []);
 
   useEffect(() => {
+    function onFullscreenChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        addNotification(`Error enabling fullscreen: ${err.message}`, "red");
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  useEffect(() => {
     function handleKeyDown(event) {
       const latest = latestStateRef.current;
 
@@ -163,6 +182,11 @@ export default function BattlefieldClient() {
 
       if (event.key === "Escape") {
         setIsAttackMoveMode(false);
+        return;
+      }
+
+      if (key === "f") {
+        toggleFullscreen();
         return;
       }
 
@@ -717,6 +741,8 @@ export default function BattlefieldClient() {
         onReset={() => socketRef.current?.emit("player:reset")}
         opponentDisconnected={opponentDisconnected}
         playerColor={playerColor}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
       />
 
       <BattlefieldWorld
