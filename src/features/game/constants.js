@@ -55,7 +55,7 @@ export const UNIT_DISPLAY_INFO = {
     shortLabel: "HT",
     attributes: ["Armored", "Vehicle heavy"],
     damageDescription: "120mm Heavy Cannon",
-    cost: 1600,
+    cost: 1500,
   },
   fighter: {
     name: "Fighter",
@@ -76,7 +76,7 @@ export const UNIT_DISPLAY_INFO = {
     shortLabel: "AA",
     attributes: ["Armored", "Vehicle"],
     damageDescription: "AA Missiles",
-    cost: 600,
+    cost: 350,
   },
   attackHelicopter: {
     name: "Attack Helicopter",
