@@ -512,6 +512,7 @@ export default function BattlefieldWorld({
   selectionBounds,
   units,
   unitsRef,
+  lastUpdateTimestamp,
   visualEffects,
   visualEffectsRef,
   visualProjectiles,
@@ -528,6 +529,60 @@ export default function BattlefieldWorld({
   const lastVisualEffectsRef = useRef(null);
   const groundUnitsRef = useRef([]);
   const airUnitsRef = useRef([]);
+
+  // Unit state history for interpolation
+  const unitHistoryRef = useRef(new Map()); // unitId -> [{x, y, angle, timestamp}]
+  const INTERPOLATION_DELAY = 50; // ms, slightly more than backend tick rate (33ms)
+
+  function lerp(start, end, t) {
+    return start + (end - start) * t;
+  }
+
+  function lerpAngle(start, end, t) {
+    const diff = end - start;
+    const normalizedDiff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
+    return start + normalizedDiff * t;
+  }
+
+  function getInterpolatedUnit(unit, renderTime) {
+    const history = unitHistoryRef.current.get(unit.id);
+    if (!history || history.length < 2) {
+      return unit;
+    }
+
+    // Find two states to interpolate between
+    const targetTime = renderTime - INTERPOLATION_DELAY;
+    
+    // Find the state just before targetTime and the state just after
+    let beforeState = null;
+    let afterState = null;
+    
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].timestamp <= targetTime) {
+        beforeState = history[i];
+        afterState = history[i + 1] || null;
+        break;
+      }
+    }
+
+    if (!beforeState || !afterState) {
+      return unit;
+    }
+
+    const timeDiff = afterState.timestamp - beforeState.timestamp;
+    if (timeDiff === 0) {
+      return unit;
+    }
+
+    const t = (targetTime - beforeState.timestamp) / timeDiff;
+    
+    return {
+      ...unit,
+      x: lerp(beforeState.x, afterState.x, t),
+      y: lerp(beforeState.y, afterState.y, t),
+      angle: lerpAngle(beforeState.angle || 0, afterState.angle || 0, t),
+    };
+  }
 
   useEffect(() => {
     const container = containerRef.current;
@@ -572,6 +627,38 @@ export default function BattlefieldWorld({
       const currentVisualProjectiles = visualProjectilesRef.current;
       const currentVisualEffects = visualEffectsRef.current;
       const currentSelectedUnitIds = selectedUnitIdsRef.current;
+      const renderTime = Date.now();
+
+      // Update unit history for interpolation
+      for (const unit of currentUnits) {
+        const unitTimestamp = unit._timestamp || lastUpdateTimestamp;
+        const history = unitHistoryRef.current.get(unit.id) || [];
+        
+        // Add new state if timestamp is different from the last one
+        if (history.length === 0 || history[history.length - 1].timestamp !== unitTimestamp) {
+          history.push({
+            x: unit.x,
+            y: unit.y,
+            angle: unit.angle || 0,
+            timestamp: unitTimestamp,
+          });
+          
+          // Keep only last 3 states to save memory
+          if (history.length > 3) {
+            history.shift();
+          }
+          
+          unitHistoryRef.current.set(unit.id, history);
+        }
+      }
+
+      // Clean up history for units that no longer exist
+      const currentUnitIds = new Set(currentUnits.map((u) => u.id));
+      for (const unitId of unitHistoryRef.current.keys()) {
+        if (!currentUnitIds.has(unitId)) {
+          unitHistoryRef.current.delete(unitId);
+        }
+      }
 
       drawBackground(ctx, currentCamera, viewportWidth, viewportHeight);
 
@@ -604,18 +691,19 @@ export default function BattlefieldWorld({
       const airUnits = airUnitsRef.current;
       
       for (const unit of currentUnits) {
-        const radius = unit.isPlane || unit.isHelicopter ? 36 : 28;
-        const screenX = unit.x - currentCamera.x;
-        const screenY = unit.y - currentCamera.y;
+        const interpolatedUnit = getInterpolatedUnit(unit, renderTime);
+        const radius = interpolatedUnit.isPlane || interpolatedUnit.isHelicopter ? 36 : 28;
+        const screenX = interpolatedUnit.x - currentCamera.x;
+        const screenY = interpolatedUnit.y - currentCamera.y;
 
         if (!isVisible(screenX - radius, screenY - radius, radius * 2, radius * 2, viewportWidth, viewportHeight)) {
           continue;
         }
 
-        if (unit.isPlane || unit.isHelicopter) {
-          airUnits.push(unit);
+        if (interpolatedUnit.isPlane || interpolatedUnit.isHelicopter) {
+          airUnits.push(interpolatedUnit);
         } else {
-          groundUnits.push(unit);
+          groundUnits.push(interpolatedUnit);
         }
       }
 
@@ -649,7 +737,7 @@ export default function BattlefieldWorld({
 
     animationFrameId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [cameraRef, unitsRef, visualProjectilesRef, visualEffectsRef, selectedUnitIdsRef, obstacles, orderMarkers, playerColor, hoveredUnitId, selectionBounds]);
+  }, [cameraRef, unitsRef, visualProjectilesRef, visualEffectsRef, selectedUnitIdsRef, obstacles, orderMarkers, playerColor, hoveredUnitId, selectionBounds, lastUpdateTimestamp]);
 
   return (
     <div

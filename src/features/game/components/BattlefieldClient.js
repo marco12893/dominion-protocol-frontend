@@ -53,6 +53,7 @@ export default function BattlefieldClient() {
   const visualEffectsRef = useRef([]);
   const cameraRef = useRef({ x: 0, y: 0 });
   const selectedUnitIdsRef = useRef([]);
+  const lastUpdateTimestampRef = useRef(Date.now());
 
   // Throttled UI state (updated at lower frequency)
   const [uiTick, setUiTick] = useState(0);
@@ -528,7 +529,12 @@ export default function BattlefieldClient() {
         setObstacles(snapshot.obstacles);
       }
       if (Array.isArray(snapshot?.units)) {
-        const normalizedUnits = snapshot.units.map(normalizeWorldUnit);
+        const timestamp = Date.now();
+        lastUpdateTimestampRef.current = timestamp;
+        const normalizedUnits = snapshot.units.map((unit) => ({
+          ...normalizeWorldUnit(unit),
+          _timestamp: timestamp,
+        }));
         setUnits(normalizedUnits);
         unitsRef.current = normalizedUnits;
       }
@@ -541,10 +547,17 @@ export default function BattlefieldClient() {
         setObstacles(delta.obstacles);
       }
       if (Array.isArray(delta?.units) || Array.isArray(delta?.removedUnitIds)) {
+        const timestamp = Date.now();
+        lastUpdateTimestampRef.current = timestamp;
         setUnits((currentUnits) => {
           const nextUnits = applyWorldDelta(currentUnits, delta);
-          unitsRef.current = nextUnits;
-          return nextUnits;
+          // Attach timestamp to updated units
+          const updatedUnits = nextUnits.map((unit) => {
+            const wasUpdated = delta.units?.some((u) => u.id === unit.id);
+            return wasUpdated ? { ...unit, _timestamp: timestamp } : unit;
+          });
+          unitsRef.current = updatedUnits;
+          return updatedUnits;
         });
       }
     });
@@ -808,6 +821,7 @@ export default function BattlefieldClient() {
         selectionBounds={selectionBounds}
         units={units}
         unitsRef={unitsRef}
+        lastUpdateTimestamp={lastUpdateTimestampRef.current}
         visualEffects={visualEffects}
         visualEffectsRef={visualEffectsRef}
         visualProjectiles={visualProjectiles}
