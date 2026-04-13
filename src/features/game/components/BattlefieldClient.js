@@ -21,6 +21,7 @@ import {
   UNIT_SELECTION_RADIUS,
 } from "@/features/game/constants";
 import {
+  applyWorldDelta,
   centerCameraOnUnits,
   clampCamera,
   getUnitDisplay,
@@ -44,7 +45,7 @@ export default function BattlefieldClient() {
   const latestStateRef = useRef({});
   const playerColorRef = useRef(null);
   const prevTeamSelectionsRef = useRef(INITIAL_TEAM_SELECTIONS);
-  const unitsRef = useRef(INITIAL_UNITS);
+  const unitsByIdRef = useRef(new Map());
 
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [controlGroups, setControlGroups] = useState({});
@@ -79,7 +80,7 @@ export default function BattlefieldClient() {
   }, [camera, controlGroups, playerColor, selectedUnitIds, units, windowSize]);
 
   useEffect(() => {
-    unitsRef.current = units;
+    unitsByIdRef.current = new Map(units.map((unit) => [unit.id, unit]));
   }, [units]);
 
   useEffect(() => {
@@ -329,7 +330,6 @@ export default function BattlefieldClient() {
           }
 
           const next = [];
-          const currentUnits = unitsRef.current;
 
           for (const projectile of current) {
             const hasFixedTarget =
@@ -337,7 +337,7 @@ export default function BattlefieldClient() {
               typeof projectile.targetY === "number";
             const target = hasFixedTarget
               ? null
-              : currentUnits.find((unit) => unit.id === projectile.targetId && unit.health > 0);
+              : unitsByIdRef.current.get(projectile.targetId) ?? null;
             const targetX = hasFixedTarget
               ? projectile.targetX
               : target
@@ -389,8 +389,12 @@ export default function BattlefieldClient() {
       setPlayerColor(null);
       setSelectedUnitIds([]);
       setControlGroups({});
+      setUnits(INITIAL_UNITS);
+      setObstacles(INITIAL_OBSTACLES);
+      setTeamSelections(INITIAL_TEAM_SELECTIONS);
       setVisualProjectiles([]);
       setVisualEffects([]);
+      prevTeamSelectionsRef.current = INITIAL_TEAM_SELECTIONS;
     });
     socket.on("unit:attack", (data) => {
       if (data.variantId === "lightTank" || data.variantId === "heavyTank") {
@@ -428,32 +432,49 @@ export default function BattlefieldClient() {
         },
       ]);
     });
-    socket.on("world:state", (state) => {
-      if (state?.teamSelections) {
-        const activePlayerColor = playerColorRef.current;
-        const nextTeamSelections = state.teamSelections;
+    function applyTeamSelections(nextTeamSelections) {
+      if (!nextTeamSelections) {
+        return;
+      }
 
-        if (activePlayerColor) {
-          const activeOpponentColor = activePlayerColor === "blue" ? "red" : "blue";
-          const previousOpponent = prevTeamSelectionsRef.current?.[activeOpponentColor];
-          const nextOpponent = nextTeamSelections[activeOpponentColor];
+      const activePlayerColor = playerColorRef.current;
 
-          if (nextOpponent?.hasDeployed && !previousOpponent?.hasDeployed) {
-            addNotification(
-              `${activeOpponentColor.toUpperCase()} BATTALION DEPLOYED`,
-              activeOpponentColor,
-            );
-          }
+      if (activePlayerColor) {
+        const activeOpponentColor = activePlayerColor === "blue" ? "red" : "blue";
+        const previousOpponent = prevTeamSelectionsRef.current?.[activeOpponentColor];
+        const nextOpponent = nextTeamSelections[activeOpponentColor];
+
+        if (nextOpponent?.hasDeployed && !previousOpponent?.hasDeployed) {
+          addNotification(
+            `${activeOpponentColor.toUpperCase()} BATTALION DEPLOYED`,
+            activeOpponentColor,
+          );
         }
+      }
 
-        prevTeamSelectionsRef.current = nextTeamSelections;
-        setTeamSelections(state.teamSelections);
+      prevTeamSelectionsRef.current = nextTeamSelections;
+      setTeamSelections(nextTeamSelections);
+    }
+
+    socket.on("world:snapshot", (snapshot) => {
+      applyTeamSelections(snapshot?.teamSelections);
+
+      if (Array.isArray(snapshot?.obstacles)) {
+        setObstacles(snapshot.obstacles);
       }
-      if (Array.isArray(state?.obstacles)) {
-        setObstacles(state.obstacles);
+      if (Array.isArray(snapshot?.units)) {
+        setUnits(snapshot.units.map(normalizeWorldUnit));
       }
-      if (Array.isArray(state?.units)) {
-        setUnits(state.units.map(normalizeWorldUnit));
+    });
+
+    socket.on("world:delta", (delta) => {
+      applyTeamSelections(delta?.teamSelections);
+
+      if (Array.isArray(delta?.obstacles)) {
+        setObstacles(delta.obstacles);
+      }
+      if (Array.isArray(delta?.units) || Array.isArray(delta?.removedUnitIds)) {
+        setUnits((currentUnits) => applyWorldDelta(currentUnits, delta));
       }
     });
 
@@ -713,6 +734,7 @@ export default function BattlefieldClient() {
         units={units}
         visualEffects={visualEffects}
         visualProjectiles={visualProjectiles}
+        windowSize={windowSize}
       />
 
       <ControlGroupsOverlay
@@ -744,7 +766,6 @@ export default function BattlefieldClient() {
         onNavigateMinimap={handleNavigateMinimap}
         onSelectSingleUnit={(unitId) => setSelectedUnitIds([unitId])}
         onStop={handleStop}
-        playerColor={playerColor}
         selectedUnit={selectedUnit}
         selectedUnitDisplay={selectedUnitDisplay}
         selectedUnitIds={selectedUnitIds}

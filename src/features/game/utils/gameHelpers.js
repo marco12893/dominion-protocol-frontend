@@ -164,3 +164,61 @@ export function normalizeWorldUnit(unit) {
   };
 }
 
+export function normalizeWorldUnitPatch(unitPatch) {
+  const patch = { ...unitPatch };
+
+  if ("attackTargetId" in patch) {
+    patch.attackTargetId = patch.attackTargetId ?? null;
+  }
+  if ("isFiring" in patch) {
+    patch.isFiring = !!patch.isFiring;
+  }
+  if ("isHoldingPosition" in patch) {
+    patch.isHoldingPosition = !!patch.isHoldingPosition;
+  }
+  if ("isMoving" in patch) {
+    patch.isMoving = !!patch.isMoving;
+  }
+  if ("orderQueue" in patch) {
+    patch.orderQueue = patch.orderQueue ?? [];
+  }
+  if ("angle" in patch) {
+    patch.angle = patch.angle ?? 0;
+  }
+  if ("isPlane" in patch) {
+    patch.isPlane = !!patch.isPlane;
+  }
+  if ("isHelicopter" in patch) {
+    patch.isHelicopter = !!patch.isHelicopter;
+  }
+  if ("damageModifiers" in patch) {
+    patch.damageModifiers = patch.damageModifiers ?? {};
+  }
+
+  return patch;
+}
+
+export function applyWorldDelta(currentUnits, delta) {
+  const unitsById = new Map(currentUnits.map((unit) => [unit.id, unit]));
+
+  for (const removedUnitId of delta.removedUnitIds ?? []) {
+    unitsById.delete(removedUnitId);
+  }
+
+  for (const incomingUnit of delta.units ?? []) {
+    const patch = normalizeWorldUnitPatch(incomingUnit);
+    const existingUnit = unitsById.get(patch.id);
+
+    if (existingUnit) {
+      unitsById.set(patch.id, {
+        ...existingUnit,
+        ...patch,
+      });
+      continue;
+    }
+
+    unitsById.set(patch.id, normalizeWorldUnit(patch));
+  }
+
+  return Array.from(unitsById.values());
+}

@@ -9,6 +9,8 @@ export default function ControlGroupsOverlay({
   onCenterGroup,
   onSelectGroup,
 }) {
+  const unitsById = new Map(units.map((unit) => [unit.id, unit]));
+
   return (
     <div
       className="absolute left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-end gap-[3px]"
@@ -18,7 +20,8 @@ export default function ControlGroupsOverlay({
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([key, ids]) => {
           const validUnits = ids
-            .map((id) => units.find((unit) => unit.id === id && unit.owner === playerColor && unit.health > 0))
+            .map((id) => unitsById.get(id))
+            .filter((unit) => unit && unit.owner === playerColor && unit.health > 0)
             .filter(Boolean);
 
           if (validUnits.length === 0) {
@@ -72,4 +75,3 @@ export default function ControlGroupsOverlay({
     </div>
   );
 }
-

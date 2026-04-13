@@ -17,7 +17,6 @@ export default function BottomHud(props) {
     onStop,
     hoveredTooltip,
     isAttackMoveMode,
-    playerColor,
     selectedUnit,
     selectedUnitDisplay,
     selectedUnitIds,
@@ -44,7 +43,6 @@ export default function BottomHud(props) {
           obstacles={obstacles}
           onIssueMove={onIssueMinimapMove}
           onNavigate={onNavigateMinimap}
-          playerColor={playerColor}
           selectedUnitIds={selectedUnitIds}
           units={units}
           windowSize={windowSize}
