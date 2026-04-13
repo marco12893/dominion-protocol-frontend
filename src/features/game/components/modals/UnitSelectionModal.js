@@ -8,6 +8,7 @@ const INITIAL_QUANTITIES = {
   armoredCar: 0,
   lightTank: 0,
   fighter: 0,
+  bomber: 0,
   antiAir: 0,
   attackHelicopter: 0,
   heavyTank: 0,

@@ -36,6 +36,8 @@ export default function SelectionPanel({
                         ? "rounded-full"
                         : selectedUnit.variantId === "armoredCar"
                           ? "rounded-md"
+                          : selectedUnit.variantId === "fighter" || selectedUnit.variantId === "bomber"
+                            ? "rounded-none"
                           : selectedUnit.variantId === "lightTank"
                             ? "rounded-none"
                             : "rounded-sm"
@@ -342,6 +344,8 @@ export default function SelectionPanel({
                       } bg-gradient-to-br text-white transition-shadow ${
                         unit.variantId === "rifleman" || unit.variantId === "attackHelicopter"
                           ? "rounded-full"
+                          : unit.variantId === "fighter" || unit.variantId === "bomber"
+                            ? "rounded-none"
                           : "rounded-sm"
                       }`}
                     >

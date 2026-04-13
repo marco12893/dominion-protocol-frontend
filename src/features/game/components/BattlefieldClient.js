@@ -303,7 +303,9 @@ export default function BattlefieldClient() {
     const interval = window.setInterval(() => {
       setVisualEffects((current) => {
         const now = Date.now();
-        const next = current.filter((effect) => now - effect.timestamp < 250);
+        const next = current.filter(
+          (effect) => now - effect.timestamp < (effect.duration ?? 250),
+        );
         return next.length !== current.length ? next : current;
       });
     }, 50);
@@ -329,11 +331,22 @@ export default function BattlefieldClient() {
           const currentUnits = unitsRef.current;
 
           for (const projectile of current) {
-            const target = currentUnits.find(
-              (unit) => unit.id === projectile.targetId && unit.health > 0,
-            );
-            const targetX = target ? target.x : (projectile.lastTargetPos?.x ?? projectile.currentX);
-            const targetY = target ? target.y : (projectile.lastTargetPos?.y ?? projectile.currentY);
+            const hasFixedTarget =
+              typeof projectile.targetX === "number" &&
+              typeof projectile.targetY === "number";
+            const target = hasFixedTarget
+              ? null
+              : currentUnits.find((unit) => unit.id === projectile.targetId && unit.health > 0);
+            const targetX = hasFixedTarget
+              ? projectile.targetX
+              : target
+                ? target.x
+                : (projectile.lastTargetPos?.x ?? projectile.currentX);
+            const targetY = hasFixedTarget
+              ? projectile.targetY
+              : target
+                ? target.y
+                : (projectile.lastTargetPos?.y ?? projectile.currentY);
             const deltaX = targetX - projectile.currentX;
             const deltaY = targetY - projectile.currentY;
             const distance = Math.hypot(deltaX, deltaY);
@@ -387,6 +400,19 @@ export default function BattlefieldClient() {
             type: "flash",
             shooterId: data.unitId,
             timestamp: Date.now(),
+          },
+        ]);
+      } else if (data.variantId === "bomber" && data.targetPos) {
+        setVisualEffects((current) => [
+          ...current,
+          {
+            id: `${data.id}-explosion`,
+            type: "explosion",
+            x: data.targetPos.x,
+            y: data.targetPos.y,
+            radius: data.splashRadius ?? 95,
+            timestamp: Date.now(),
+            duration: 450,
           },
         ]);
       }

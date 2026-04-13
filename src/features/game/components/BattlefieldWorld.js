@@ -40,6 +40,22 @@ function ProjectileSprite({ projectile }) {
     );
   }
 
+  if (projectile.variantId === "bomber_bomb") {
+    return (
+      <div
+        className="absolute pointer-events-none z-40"
+        style={{
+          left: projectile.currentX,
+          top: projectile.currentY,
+          transform: `translate(-50%, -50%) rotate(${projectile.angle || 0}rad)`,
+        }}
+      >
+        <div className="absolute right-[60%] top-1/2 -translate-y-1/2 w-6 h-2 bg-gradient-to-r from-transparent to-orange-300/70 blur-[3px]" />
+        <div className="relative h-3 w-2.5 rounded-full border border-orange-100/60 bg-gradient-to-b from-slate-200 to-slate-700 shadow-[0_0_12px_rgba(251,146,60,0.55)]" />
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -145,6 +161,8 @@ function UnitSprite({
                         ? "h-10 w-10 rounded-full border-dashed"
                         : unit.variantId === "fighter"
                           ? "h-14 w-12 shadow-[0_0_25px_rgba(255,255,255,0.2)]"
+                          : unit.variantId === "bomber"
+                            ? "h-16 w-16 shadow-[0_0_30px_rgba(251,146,60,0.22)]"
                           : "h-7 w-7 rounded-sm"
         }`}
         style={{
@@ -152,16 +170,24 @@ function UnitSprite({
           clipPath:
             unit.variantId === "fighter"
               ? "polygon(100% 50%, 0% 0%, 25% 50%, 0% 100%)"
+              : unit.variantId === "bomber"
+                ? "polygon(100% 50%, 74% 26%, 60% 0%, 46% 18%, 0% 6%, 24% 50%, 0% 94%, 46% 82%, 60% 100%, 74% 74%)"
               : "none",
         }}
       >
         {unit.variantId === "fighter" && (
           <div className="absolute top-[35%] right-[20%] w-[25%] h-[30%] bg-cyan-200/60 rounded-full shadow-[0_0_10px_rgba(165,243,252,0.8)]" />
         )}
+        {unit.variantId === "bomber" && (
+          <>
+            <div className="absolute inset-y-[18%] right-[26%] w-[18%] rounded-full bg-orange-200/70 shadow-[0_0_12px_rgba(253,186,116,0.8)]" />
+            <div className="absolute inset-y-[35%] left-[20%] right-[34%] border-y border-slate-950/35" />
+          </>
+        )}
         {unit.variantId === "antiAir" && (
           <div className="absolute inset-x-2 bottom-1 h-3 bg-white/20 border border-white/30 rounded-t-sm" />
         )}
-        {unit.variantId !== "fighter" && (
+        {unit.variantId !== "fighter" && unit.variantId !== "bomber" && (
           <div className={unit.variantId === "antiAir" ? "absolute top-1" : ""}>
             {UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel || "?"}
           </div>
@@ -172,6 +198,7 @@ function UnitSprite({
         unit.variantId !== "antiTank" &&
         unit.variantId !== "lightTank" &&
         unit.variantId !== "antiAir" &&
+        unit.variantId !== "bomber" &&
         (() => {
           const target = units.find((entry) => entry.id === unit.attackTargetId);
           if (!target) return null;
@@ -360,6 +387,36 @@ export default function BattlefieldWorld({
         {visualProjectiles.map((projectile) => (
           <ProjectileSprite key={projectile.id} projectile={projectile} />
         ))}
+
+        {visualEffects
+          .filter((effect) => effect.type === "explosion")
+          .map((effect) => (
+            <div
+              key={effect.id}
+              className="absolute pointer-events-none"
+              style={{
+                left: effect.x,
+                top: effect.y,
+                width: effect.radius * 2,
+                height: effect.radius * 2,
+                transform: "translate(-50%, -50%)",
+                zIndex: 45,
+              }}
+            >
+              <div
+                className="absolute inset-0 rounded-full border-4 border-orange-300/80"
+                style={{ animation: "explosion-ring 0.45s ease-out forwards" }}
+              />
+              <div
+                className="absolute inset-[18%] rounded-full bg-orange-400/50 blur-md"
+                style={{ animation: "explosion-core 0.4s ease-out forwards" }}
+              />
+              <div
+                className="absolute inset-[30%] rounded-full bg-yellow-200/80 blur-sm"
+                style={{ animation: "explosion 0.35s ease-out forwards" }}
+              />
+            </div>
+          ))}
       </div>
     </div>
   );

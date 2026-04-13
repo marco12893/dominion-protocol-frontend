@@ -64,6 +64,13 @@ export const UNIT_DISPLAY_INFO = {
     damageDescription: "Twin Machine Guns",
     cost: 1000,
   },
+  bomber: {
+    name: "Bomber",
+    shortLabel: "B",
+    attributes: ["Air", "Plane", "Siege"],
+    damageDescription: "Heavy Gravity Bombs",
+    cost: 1800,
+  },
   antiAir: {
     name: "Anti-Air",
     shortLabel: "AA",
@@ -86,4 +93,3 @@ export const FALLBACK_UNIT_DISPLAY = {
   attributes: [],
   damageDescription: "Unknown",
 };
-
