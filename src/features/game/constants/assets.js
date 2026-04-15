@@ -7,7 +7,7 @@ export const UNIT_ASSETS = {
   fighter: "/image/Fighter.png",
   bomber: "/image/Bomber.png",
   antiAir: "/image/Anti-Air.png",
-  attackHelicopter: "/image/Attack_Helicopter.png",
+  attackHelicopter: "/image/New folder/Helicopter_Spritesheet.png",
 };
 
 export const UNIT_ASSET_SIZES = {
@@ -19,5 +19,10 @@ export const UNIT_ASSET_SIZES = {
   fighter: { width: 135, height: 180 },
   bomber: { width: 240, height: 240 },
   antiAir: { width: 70, height: 70 },
-  attackHelicopter: { width: 90, height: 90 },
+  attackHelicopter: { 
+    width: 90, 
+    height: 90, 
+    preview: "/image/Attack_Helicopter.png",
+    spritesheet: { rows: 6, cols: 6, totalFrames: 36, duration: 100 } 
+  },
 };

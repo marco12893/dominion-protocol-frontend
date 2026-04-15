@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { STARTING_RESOURCES, UNIT_DISPLAY_INFO } from "@/features/game/constants";
 import { UNIT_ASSETS } from "@/features/game/constants/assets";
+import UnitPreviewImage from "@/features/game/components/UnitPreviewImage";
 
 const INITIAL_QUANTITIES = {
   rifleman: 0,
@@ -73,8 +74,9 @@ export default function UnitSelectionModal({ onDeploy, playerColor }) {
                       : "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
                   } overflow-hidden`}
                 >
-                  <img
-                    src={UNIT_ASSETS[id]}
+                  <UnitPreviewImage
+                    unitId={id}
+                    assetPath={UNIT_ASSETS[id]}
                     alt={info.name}
                     className="w-[85%] h-[85%] object-contain"
                   />

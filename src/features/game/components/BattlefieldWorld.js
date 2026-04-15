@@ -293,7 +293,7 @@ function drawHealthBar(ctx, unit, screenX, screenY) {
   ctx.stroke();
 }
 
-function drawUnitBody(ctx, unit, colorTheme, assetImages) {
+function drawUnitBody(ctx, unit, colorTheme, assetImages, renderTime = Date.now()) {
   const img = assetImages.get(unit.variantId);
 
   if (img) {
@@ -304,8 +304,24 @@ function drawUnitBody(ctx, unit, colorTheme, assetImages) {
     // So we add 90 degrees (PI/2) to align the North-facing asset to East.
     ctx.rotate(Math.PI / 2);
     
-    // Draw the image
-    ctx.drawImage(img, -size.width / 2, -size.height / 2, size.width, size.height);
+    if (size.spritesheet) {
+      const { rows, cols, totalFrames, duration } = size.spritesheet;
+      const frameIndex = Math.floor((renderTime % duration) / (duration / totalFrames)) % totalFrames;
+      
+      const fw = img.width / cols;
+      const fh = img.height / rows;
+      const fx = (frameIndex % cols) * fw;
+      const fy = Math.floor(frameIndex / cols) * fh;
+
+      ctx.drawImage(
+        img,
+        fx, fy, fw, fh,
+        -size.width / 2, -size.height / 2, size.width, size.height
+      );
+    } else {
+      ctx.drawImage(img, -size.width / 2, -size.height / 2, size.width, size.height);
+    }
+    
     ctx.restore();
     return;
   }
@@ -460,7 +476,7 @@ function drawUnit(ctx, unit, options) {
   ctx.save();
   ctx.translate(screenX, screenY);
   ctx.rotate(unit.angle ?? 0);
-  drawUnitBody(ctx, unit, colorTheme, options.assetImages);
+  drawUnitBody(ctx, unit, colorTheme, options.assetImages, options.renderTime);
   ctx.restore();
 
   if (
@@ -780,6 +796,8 @@ export default function BattlefieldWorld({
         }
       }
 
+      const targetTime = renderTime - 100; // Match INTERPOLATION_DELAY
+
       for (const unit of [...groundUnits, ...helicopterUnits, ...planeUnits]) {
         drawUnit(ctx, unit, {
           camera: currentCamera,
@@ -790,7 +808,7 @@ export default function BattlefieldWorld({
           flashShooterIds: flashShooterIdsRef.current,
           assetImages: assetImagesRef.current,
           targetedIdSet,
-          renderTime,
+          renderTime: targetTime,
         });
       }
 

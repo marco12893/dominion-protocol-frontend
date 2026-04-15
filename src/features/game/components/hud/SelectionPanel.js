@@ -1,5 +1,6 @@
 import { getUnitDisplay } from "@/features/game/utils/gameHelpers";
 import { UNIT_ASSETS } from "@/features/game/constants/assets";
+import UnitPreviewImage from "@/features/game/components/UnitPreviewImage";
 
 export default function SelectionPanel({
   hoveredTooltip,
@@ -34,8 +35,9 @@ export default function SelectionPanel({
                 <div
                   className={`w-14 h-14 flex items-center justify-center overflow-hidden`}
                 >
-                  <img
-                    src={UNIT_ASSETS[selectedUnit.variantId]}
+                  <UnitPreviewImage
+                    unitId={selectedUnit.variantId}
+                    assetPath={UNIT_ASSETS[selectedUnit.variantId]}
                     alt={selectedUnitDisplay.name}
                     className="w-[90%] h-[90%] object-contain drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]"
                   />
@@ -330,8 +332,9 @@ export default function SelectionPanel({
                     <div
                       className={`w-7 h-7 flex items-center justify-center overflow-hidden`}
                     >
-                      <img
-                        src={UNIT_ASSETS[unit.variantId]}
+                      <UnitPreviewImage
+                        unitId={unit.variantId}
+                        assetPath={UNIT_ASSETS[unit.variantId]}
                         alt={display.name}
                         className="w-[90%] h-[90%] object-contain"
                       />
