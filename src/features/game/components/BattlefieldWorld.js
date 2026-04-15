@@ -751,7 +751,9 @@ export default function BattlefieldWorld({
       
       for (const unit of currentUnits) {
         const interpolatedUnit = getInterpolatedUnit(unit, renderTime);
-        const radius = interpolatedUnit.isPlane || interpolatedUnit.isHelicopter ? 36 : 28;
+        const assetSize = UNIT_ASSET_SIZES[interpolatedUnit.variantId] || { width: 32, height: 32 };
+        const radius = Math.max(assetSize.width, assetSize.height) / 2 + 30; // buffer
+        
         const screenX = interpolatedUnit.x - currentCamera.x;
         const screenY = interpolatedUnit.y - currentCamera.y;
 
