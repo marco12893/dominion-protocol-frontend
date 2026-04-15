@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { MAP_HEIGHT, MAP_WIDTH, UNIT_DISPLAY_INFO } from "@/features/game/constants";
+import { UNIT_ASSETS, UNIT_ASSET_SIZES } from "@/features/game/constants/assets";
 
 const OWNER_COLORS = {
   blue: {
@@ -170,15 +171,27 @@ function drawOrderLines(ctx, selectedUnitIds, unitsById, camera) {
   ctx.setLineDash([]);
 }
 
-function drawOrderMarkers(ctx, orderMarkers, camera) {
+function drawOrderMarkers(ctx, orderMarkers, camera, unitsById) {
   const now = Date.now();
 
   for (const marker of orderMarkers) {
     const elapsed = Math.min(1, (now - marker.timestamp) / 350);
     const radius = 10 + elapsed * 8;
     const alpha = 1 - elapsed;
-    const x = marker.x - camera.x;
-    const y = marker.y - camera.y;
+    
+    let x = marker.x;
+    let y = marker.y;
+    
+    if (marker.targetId && unitsById) {
+      const target = unitsById.get(marker.targetId);
+      if (target) {
+        x = target.x;
+        y = target.y;
+      }
+    }
+    
+    const screenX = x - camera.x;
+    const screenY = y - camera.y;
 
     ctx.strokeStyle =
       marker.type === "move"
@@ -186,12 +199,12 @@ function drawOrderMarkers(ctx, orderMarkers, camera) {
         : `rgba(244, 63, 94, ${alpha * 0.8})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.fillStyle = marker.type === "move" ? "#4ade80" : "#f43f5e";
     ctx.beginPath();
-    ctx.arc(x, y, 2, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY, 2, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -280,7 +293,24 @@ function drawHealthBar(ctx, unit, screenX, screenY) {
   ctx.stroke();
 }
 
-function drawUnitBody(ctx, unit, colorTheme) {
+function drawUnitBody(ctx, unit, colorTheme, assetImages) {
+  const img = assetImages.get(unit.variantId);
+
+  if (img) {
+    const size = UNIT_ASSET_SIZES[unit.variantId] || { width: 32, height: 32 };
+    
+    ctx.save();
+    // Assets face North, but game coordinate 0 is East.
+    // So we add 90 degrees (PI/2) to align the North-facing asset to East.
+    ctx.rotate(Math.PI / 2);
+    
+    // Draw the image
+    ctx.drawImage(img, -size.width / 2, -size.height / 2, size.width, size.height);
+    ctx.restore();
+    return;
+  }
+
+  // Fallback to geometric shapes if image not loaded
   ctx.fillStyle = colorTheme.primary;
   ctx.strokeStyle = colorTheme.accent;
   ctx.lineWidth = 1.4;
@@ -396,7 +426,27 @@ function drawUnit(ctx, unit, options) {
     ctx.stroke();
   }
 
-  if (hoveredUnitId === unit.id && !isSelected) {
+  const targetedIdSet = options.targetedIdSet;
+  const isTargetedBySelection = !isOwned && targetedIdSet?.has(unit.id);
+
+  if (isTargetedBySelection) {
+    const renderTime = options.renderTime;
+    const spinSpeed = 0.006;
+    const angle = (renderTime * spinSpeed) % (Math.PI * 2);
+
+    ctx.save();
+    ctx.translate(screenX, screenY);
+    ctx.rotate(angle);
+    ctx.strokeStyle = "rgba(244, 63, 94, 0.85)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (hoveredUnitId === unit.id && !isSelected && !isTargetedBySelection) {
     ctx.strokeStyle =
       unit.owner === playerColor ? "rgba(252, 211, 77, 0.9)" : "rgba(244, 63, 94, 0.9)";
     ctx.lineWidth = 2;
@@ -410,16 +460,7 @@ function drawUnit(ctx, unit, options) {
   ctx.save();
   ctx.translate(screenX, screenY);
   ctx.rotate(unit.angle ?? 0);
-  drawUnitBody(ctx, unit, colorTheme);
-
-  if (unit.variantId !== "fighter" && unit.variantId !== "bomber") {
-    const label = UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel ?? "?";
-    ctx.fillStyle = "#f8fafc";
-    ctx.font = "900 8px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, 0, 0);
-  }
+  drawUnitBody(ctx, unit, colorTheme, options.assetImages);
   ctx.restore();
 
   if (
@@ -529,6 +570,24 @@ export default function BattlefieldWorld({
   const lastVisualEffectsRef = useRef(null);
   const groundUnitsRef = useRef([]);
   const airUnitsRef = useRef([]);
+  const assetImagesRef = useRef(new Map());
+  const [, setAssetsLoaded] = useState(false);
+
+  useEffect(() => {
+    let loaded = 0;
+    const entries = Object.entries(UNIT_ASSETS);
+    entries.forEach(([id, path]) => {
+      const img = new Image();
+      img.src = path;
+      img.onload = () => {
+        assetImagesRef.current.set(id, img);
+        loaded++;
+        if (loaded === entries.length) {
+          setAssetsLoaded((v) => !v); // Force a re-render once all loaded
+        }
+      };
+    });
+  }, []);
 
   // Unit state history for interpolation
   const unitHistoryRef = useRef(new Map()); // unitId -> [{x, y, angle, timestamp}]
@@ -682,7 +741,7 @@ export default function BattlefieldWorld({
 
       drawOrderLines(ctx, currentSelectedUnitIds, unitsByIdRef.current, currentCamera);
       drawObstacles(ctx, obstacles, currentCamera, viewportWidth, viewportHeight);
-      drawOrderMarkers(ctx, orderMarkers, currentCamera);
+      drawOrderMarkers(ctx, orderMarkers, currentCamera, unitsByIdRef.current);
 
       // Reuse arrays to avoid allocations
       groundUnitsRef.current.length = 0;
@@ -707,6 +766,14 @@ export default function BattlefieldWorld({
         }
       }
 
+      const targetedIdSet = new Set();
+      for (const id of currentSelectedUnitIds) {
+        const u = unitsByIdRef.current.get(id);
+        if (u?.attackTargetId) {
+          targetedIdSet.add(u.attackTargetId);
+        }
+      }
+
       for (const unit of [...groundUnits, ...airUnits]) {
         drawUnit(ctx, unit, {
           camera: currentCamera,
@@ -715,6 +782,9 @@ export default function BattlefieldWorld({
           selectedUnitIdSet: selectedUnitIdSetRef.current,
           unitsById: unitsByIdRef.current,
           flashShooterIds: flashShooterIdsRef.current,
+          assetImages: assetImagesRef.current,
+          targetedIdSet,
+          renderTime,
         });
       }
 

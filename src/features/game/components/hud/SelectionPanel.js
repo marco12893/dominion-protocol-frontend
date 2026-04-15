@@ -1,4 +1,5 @@
 import { getUnitDisplay } from "@/features/game/utils/gameHelpers";
+import { UNIT_ASSETS } from "@/features/game/constants/assets";
 
 export default function SelectionPanel({
   hoveredTooltip,
@@ -31,25 +32,13 @@ export default function SelectionPanel({
                 } bg-gradient-to-br from-[#0d1a2a] to-[#061018] flex items-center justify-center shadow-[inset_0_0_30px_rgba(0,0,0,0.5)]`}
               >
                 <div
-                  className={`w-14 h-14 flex items-center justify-center text-xl font-black ${
-                    selectedUnit.variantId === "rifleman"
-                      ? "rounded-full"
-                      : selectedUnit.variantId === "antiTank"
-                        ? "rounded-full"
-                        : selectedUnit.variantId === "armoredCar"
-                          ? "rounded-md"
-                          : selectedUnit.variantId === "fighter" || selectedUnit.variantId === "bomber"
-                            ? "rounded-none"
-                          : selectedUnit.variantId === "lightTank"
-                            ? "rounded-none"
-                            : "rounded-sm"
-                  } border-2 ${
-                    selectedUnit.owner === "red"
-                      ? "border-rose-300/60 bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_25px_rgba(244,63,94,0.6)]"
-                      : "border-cyan-300/60 bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_0_25px_rgba(34,211,238,0.6)]"
-                  } text-white`}
+                  className={`w-14 h-14 flex items-center justify-center overflow-hidden`}
                 >
-                  {selectedUnitDisplay.shortLabel}
+                  <img
+                    src={UNIT_ASSETS[selectedUnit.variantId]}
+                    alt={selectedUnitDisplay.name}
+                    className="w-[90%] h-[90%] object-contain drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]"
+                  />
                 </div>
               </div>
               <div
@@ -339,19 +328,13 @@ export default function SelectionPanel({
                 >
                   <div className="flex-1 flex items-center justify-center pt-1">
                     <div
-                      className={`w-7 h-7 flex items-center justify-center text-[8px] font-extrabold leading-none border ${
-                        unit.owner === "red"
-                          ? "border-rose-200/50 from-rose-400 to-rose-600 shadow-[0_0_10px_rgba(244,63,94,0.3)] group-hover:shadow-[0_0_14px_rgba(244,63,94,0.5)]"
-                          : "border-cyan-200/50 from-cyan-400 to-cyan-600 shadow-[0_0_10px_rgba(34,211,238,0.3)] group-hover:shadow-[0_0_14px_rgba(34,211,238,0.5)]"
-                      } bg-gradient-to-br text-white transition-shadow ${
-                        unit.variantId === "rifleman" || unit.variantId === "attackHelicopter"
-                          ? "rounded-full"
-                          : unit.variantId === "fighter" || unit.variantId === "bomber"
-                            ? "rounded-none"
-                          : "rounded-sm"
-                      }`}
+                      className={`w-7 h-7 flex items-center justify-center overflow-hidden`}
                     >
-                      {display.shortLabel}
+                      <img
+                        src={UNIT_ASSETS[unit.variantId]}
+                        alt={display.name}
+                        className="w-[90%] h-[90%] object-contain"
+                      />
                     </div>
                   </div>
                   <div className="w-full px-1 pb-1.5">

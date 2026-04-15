@@ -651,6 +651,18 @@ export default function BattlefieldClient() {
         targetId: clickedEnemy.id,
         isQueued: event.shiftKey,
       });
+
+      setOrderMarkers((current) => [
+        ...current,
+        {
+          x: clickedEnemy.x,
+          y: clickedEnemy.y,
+          type: "attack",
+          targetId: clickedEnemy.id,
+          id: Math.random(),
+          timestamp: Date.now(),
+        },
+      ]);
       return;
     }
 

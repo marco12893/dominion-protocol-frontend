@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { STARTING_RESOURCES, UNIT_DISPLAY_INFO } from "@/features/game/constants";
+import { UNIT_ASSETS } from "@/features/game/constants/assets";
 
 const INITIAL_QUANTITIES = {
   rifleman: 0,
@@ -70,15 +71,13 @@ export default function UnitSelectionModal({ onDeploy, playerColor }) {
                     playerColor === "red"
                       ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
                       : "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
-                  } ${
-                    id === "rifleman" || id === "antiTank"
-                      ? "rounded-full"
-                      : id === "armoredCar"
-                        ? "rounded-lg"
-                        : "rounded-none"
-                  }`}
+                  } overflow-hidden`}
                 >
-                  {info.shortLabel}
+                  <img
+                    src={UNIT_ASSETS[id]}
+                    alt={info.name}
+                    className="w-[85%] h-[85%] object-contain"
+                  />
                 </div>
 
                 <div className="flex-1">
