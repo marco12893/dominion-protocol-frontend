@@ -569,6 +569,7 @@ export default function BattlefieldWorld({
   const lastSelectedUnitIdsRef = useRef(null);
   const lastVisualEffectsRef = useRef(null);
   const groundUnitsRef = useRef([]);
+  const helicopterUnitsRef = useRef([]);
   const airUnitsRef = useRef([]);
   const assetImagesRef = useRef(new Map());
   const [, setAssetsLoaded] = useState(false);
@@ -743,11 +744,12 @@ export default function BattlefieldWorld({
       drawObstacles(ctx, obstacles, currentCamera, viewportWidth, viewportHeight);
       drawOrderMarkers(ctx, orderMarkers, currentCamera, unitsByIdRef.current);
 
-      // Reuse arrays to avoid allocations
       groundUnitsRef.current.length = 0;
+      helicopterUnitsRef.current.length = 0;
       airUnitsRef.current.length = 0;
       const groundUnits = groundUnitsRef.current;
-      const airUnits = airUnitsRef.current;
+      const helicopterUnits = helicopterUnitsRef.current;
+      const planeUnits = airUnitsRef.current;
       
       for (const unit of currentUnits) {
         const interpolatedUnit = getInterpolatedUnit(unit, renderTime);
@@ -761,8 +763,10 @@ export default function BattlefieldWorld({
           continue;
         }
 
-        if (interpolatedUnit.isPlane || interpolatedUnit.isHelicopter) {
-          airUnits.push(interpolatedUnit);
+        if (interpolatedUnit.isPlane) {
+          planeUnits.push(interpolatedUnit);
+        } else if (interpolatedUnit.isHelicopter) {
+          helicopterUnits.push(interpolatedUnit);
         } else {
           groundUnits.push(interpolatedUnit);
         }
@@ -776,7 +780,7 @@ export default function BattlefieldWorld({
         }
       }
 
-      for (const unit of [...groundUnits, ...airUnits]) {
+      for (const unit of [...groundUnits, ...helicopterUnits, ...planeUnits]) {
         drawUnit(ctx, unit, {
           camera: currentCamera,
           hoveredUnitId,
