@@ -902,7 +902,10 @@ export default function BattlefieldClient() {
           )}
         </>
       ) : (
-        <HexGridWorld windowSize={windowSize} />
+        <>
+          <HexGridWorld windowSize={windowSize} playerColor={playerColor} socketRef={socketRef} />
+          {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
+        </>
       )}
 
       <BattlefieldStyles />
