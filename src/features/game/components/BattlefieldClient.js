@@ -6,6 +6,7 @@ import { io } from "socket.io-client";
 import BattlefieldStyles from "@/features/game/components/BattlefieldStyles";
 import BattlefieldTopOverlay from "@/features/game/components/BattlefieldTopOverlay";
 import BattlefieldWorld from "@/features/game/components/BattlefieldWorld";
+import HexGridWorld from "@/features/game/components/HexGridWorld";
 import ControlGroupsOverlay from "@/features/game/components/ControlGroupsOverlay";
 import BottomHud from "@/features/game/components/hud/BottomHud";
 import ColorChooserModal from "@/features/game/components/modals/ColorChooserModal";
@@ -76,6 +77,7 @@ export default function BattlefieldClient() {
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeLayer, setActiveLayer] = useState(3);
 
   const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
@@ -815,87 +817,95 @@ export default function BattlefieldClient() {
         playerColor={playerColor}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
+        activeLayer={activeLayer}
+        onToggleLayer={() => setActiveLayer((l) => (l === 3 ? 2 : 3))}
       />
 
-      <BattlefieldWorld
-        camera={camera}
-        cameraRef={cameraRef}
-        hoveredUnitId={hoveredUnitId}
-        isAttackMoveMode={isAttackMoveMode}
-        obstacles={obstacles}
-        onDoubleClick={handleMapDoubleClick}
-        onPointerDown={handleMapPointerDown}
-        onRightClick={handleMapRightClick}
-        orderMarkers={orderMarkers}
-        playerColor={playerColor}
-        selectedUnitIds={selectedUnitIds}
-        selectedUnitIdsRef={selectedUnitIdsRef}
-        selectionBounds={selectionBounds}
-        units={units}
-        unitsRef={unitsRef}
-        lastUpdateTimestamp={lastUpdateTimestampRef.current}
-        visualEffects={visualEffects}
-        visualEffectsRef={visualEffectsRef}
-        visualProjectiles={visualProjectiles}
-        visualProjectilesRef={visualProjectilesRef}
-        windowSize={windowSize}
-      />
+      {activeLayer === 3 ? (
+        <>
+          <BattlefieldWorld
+            camera={camera}
+            cameraRef={cameraRef}
+            hoveredUnitId={hoveredUnitId}
+            isAttackMoveMode={isAttackMoveMode}
+            obstacles={obstacles}
+            onDoubleClick={handleMapDoubleClick}
+            onPointerDown={handleMapPointerDown}
+            onRightClick={handleMapRightClick}
+            orderMarkers={orderMarkers}
+            playerColor={playerColor}
+            selectedUnitIds={selectedUnitIds}
+            selectedUnitIdsRef={selectedUnitIdsRef}
+            selectionBounds={selectionBounds}
+            units={units}
+            unitsRef={unitsRef}
+            lastUpdateTimestamp={lastUpdateTimestampRef.current}
+            visualEffects={visualEffects}
+            visualEffectsRef={visualEffectsRef}
+            visualProjectiles={visualProjectiles}
+            visualProjectilesRef={visualProjectilesRef}
+            windowSize={windowSize}
+          />
 
-      <ControlGroupsOverlay
-        controlGroups={controlGroups}
-        onCenterGroup={(groupUnits, viewport) =>
-          setCamera(centerCameraOnUnits(groupUnits, viewport))
-        }
-        onSelectGroup={setSelectedUnitIds}
-        playerColor={playerColor}
-        selectedUnitIds={selectedUnitIds}
-        units={units}
-        windowSize={windowSize}
-      />
+          <ControlGroupsOverlay
+            controlGroups={controlGroups}
+            onCenterGroup={(groupUnits, viewport) =>
+              setCamera(centerCameraOnUnits(groupUnits, viewport))
+            }
+            onSelectGroup={setSelectedUnitIds}
+            playerColor={playerColor}
+            selectedUnitIds={selectedUnitIds}
+            units={units}
+            windowSize={windowSize}
+          />
 
-      <BottomHud
-        allSelectedHoldingPosition={allSelectedHoldingPosition}
-        camera={camera}
-        hoveredTooltip={hoveredTooltip}
-        isAttackMoveMode={isAttackMoveMode}
-        obstacles={obstacles}
-        onActivateAttackMove={() => {
-          if (selectedUnitIds.length > 0) {
-            setIsAttackMoveMode(true);
-          }
-        }}
-        onHoldPosition={handleHoldPosition}
-        onHoverTooltipChange={setHoveredTooltip}
-        onIssueMinimapMove={handleIssueMinimapMove}
-        onNavigateMinimap={handleNavigateMinimap}
-        onSelectSingleUnit={(unitId) => setSelectedUnitIds([unitId])}
-        onStop={handleStop}
-        selectedUnit={selectedUnit}
-        selectedUnitDisplay={selectedUnitDisplay}
-        selectedUnitIds={selectedUnitIds}
-        units={units}
-        windowSize={windowSize}
-      />
+          <BottomHud
+            allSelectedHoldingPosition={allSelectedHoldingPosition}
+            camera={camera}
+            hoveredTooltip={hoveredTooltip}
+            isAttackMoveMode={isAttackMoveMode}
+            obstacles={obstacles}
+            onActivateAttackMove={() => {
+              if (selectedUnitIds.length > 0) {
+                setIsAttackMoveMode(true);
+              }
+            }}
+            onHoldPosition={handleHoldPosition}
+            onHoverTooltipChange={setHoveredTooltip}
+            onIssueMinimapMove={handleIssueMinimapMove}
+            onNavigateMinimap={handleNavigateMinimap}
+            onSelectSingleUnit={(unitId) => setSelectedUnitIds([unitId])}
+            onStop={handleStop}
+            selectedUnit={selectedUnit}
+            selectedUnitDisplay={selectedUnitDisplay}
+            selectedUnitIds={selectedUnitIds}
+            units={units}
+            windowSize={windowSize}
+          />
+
+          {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
+
+          {playerColor && !teamSelections[playerColor]?.hasDeployed && (
+            <UnitSelectionModal
+              playerColor={playerColor}
+              onDeploy={(manifest) => {
+                socketRef.current?.emit("player:deploy", manifest);
+              }}
+            />
+          )}
+
+          {opponentDisconnected && (
+            <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur-md text-rose-400 text-sm font-bold flex items-center gap-3 animate-bounce">
+              <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              OPPONENT COMMANDER DISCONNECTED
+            </div>
+          )}
+        </>
+      ) : (
+        <HexGridWorld windowSize={windowSize} />
+      )}
 
       <BattlefieldStyles />
-
-      {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
-
-      {playerColor && !teamSelections[playerColor]?.hasDeployed && (
-        <UnitSelectionModal
-          playerColor={playerColor}
-          onDeploy={(manifest) => {
-            socketRef.current?.emit("player:deploy", manifest);
-          }}
-        />
-      )}
-
-      {opponentDisconnected && (
-        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur-md text-rose-400 text-sm font-bold flex items-center gap-3 animate-bounce">
-          <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-          OPPONENT COMMANDER DISCONNECTED
-        </div>
-      )}
     </main>
   );
 }

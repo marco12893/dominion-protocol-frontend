@@ -6,6 +6,8 @@ export default function BattlefieldTopOverlay({
   playerColor,
   isFullscreen,
   onToggleFullscreen,
+  activeLayer,
+  onToggleLayer,
 }) {
   return (
     <>
@@ -15,7 +17,7 @@ export default function BattlefieldTopOverlay({
             Dominion Protocol
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-white drop-shadow-md">
-            RTS Prototype
+            {activeLayer === 3 ? "RTS Prototype" : "Strategic Map"}
           </h1>
         </div>
 
@@ -92,6 +94,31 @@ export default function BattlefieldTopOverlay({
 
       <div className="absolute top-4 right-4 z-[60] flex flex-col items-end gap-3 pointer-events-auto">
         <div className="flex items-center gap-3">
+          {/* Layer toggle button */}
+          <button
+            id="layer-toggle-btn"
+            onClick={onToggleLayer}
+            className={`px-4 py-2.5 rounded border backdrop-blur-md text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl group ${
+              activeLayer === 2
+                ? "border-cyan-500/50 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400"
+                : "border-white/10 bg-[#0f1722]/80 hover:bg-[#1a2635] text-slate-400 hover:text-cyan-400"
+            }`}
+            title={activeLayer === 3 ? "Switch to Hex Grid (Layer 2)" : "Switch to RTS (Layer 3)"}
+          >
+            {activeLayer === 2 ? (
+              /* Hexagon icon */
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              </svg>
+            ) : (
+              /* Grid/crosshair icon */
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              </svg>
+            )}
+            <span>{activeLayer === 2 ? "Layer 2" : "Layer 3"}</span>
+          </button>
+
           <button
             id="fullscreen-toggle-btn"
             onClick={onToggleFullscreen}
