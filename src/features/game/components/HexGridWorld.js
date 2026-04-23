@@ -679,16 +679,6 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         </button>
       </div>
 
-      {/* Player indicator */}
-      {playerColor && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-[60] pointer-events-none">
-          <div className={`px-4 py-1.5 rounded-full border ${
-            playerColor === "blue" ? "border-cyan-500/30 text-cyan-400" : "border-rose-500/30 text-rose-400"
-          } bg-slate-900/80 backdrop-blur-md text-[10px] font-black uppercase tracking-widest`}>
-            {playerColor} — Strategic Command
-          </div>
-        </div>
-      )}
     </div>
   );
 }
