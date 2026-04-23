@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  hexToPixel, pixelToHex, hexCorners, getHexesInRange,
+  hexToPixel,
+  pixelToHex,
+  hexCorners,
+  getHexesInRange,
+  getHexNeighbors,
+  getTraversableHexesInRange,
 } from "@/features/game/utils/hexMath";
 import {
   HEX_BASE_TILE_HEIGHT,
   HEX_BASE_TILE_WIDTH,
   HEX_TERRAIN_ASSETS,
+  HEX_SPRITE_ASSETS,
 } from "@/features/game/constants/hexTerrainAssets";
 
 const HEX_SIZE = 32;
@@ -18,8 +24,23 @@ const LAST_HEX = hexToPixel(GRID_COLS - 1, GRID_ROWS - 1, HEX_SIZE);
 const HEX_WORLD_WIDTH = LAST_HEX.x + HEX_SIZE * 2 + WORLD_PADDING;
 const HEX_WORLD_HEIGHT = LAST_HEX.y + HEX_SIZE * 2 + WORLD_PADDING;
 const MOVEMENT_RANGE = 2;
+const CITY_BORDER_RANGE = 1;
 const TILE_HALF_WIDTH = HEX_BASE_TILE_WIDTH / 2;
 const TILE_HALF_HEIGHT = HEX_BASE_TILE_HEIGHT / 2;
+const HEX_CORNERS = hexCorners(0, 0, HEX_SIZE - 1);
+const HEX_SIDE_SEGMENTS = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [4, 5],
+  [5, 0],
+];
+const HEX_SIDE_ANGLES = HEX_SIDE_SEGMENTS.map(([startIndex, endIndex]) => {
+  const start = HEX_CORNERS[startIndex];
+  const end = HEX_CORNERS[endIndex];
+  return Math.atan2((start.y + end.y) / 2, (start.x + end.x) / 2);
+});
 
 const COLORS = {
   bg: "#1a2332",
@@ -33,11 +54,20 @@ const COLORS = {
   unitBlue: "#22d3ee",
   unitRed: "#fb7185",
   unitDotRadius: 8,
-  cityBlue: "rgba(34, 211, 238, 0.10)",
-  cityBlueBorder: "rgba(34, 211, 238, 0.55)",
-  cityRed: "rgba(251, 113, 133, 0.10)",
-  cityRedBorder: "rgba(251, 113, 133, 0.55)",
   dimAlpha: 0.35,
+};
+
+const OWNER_THEMES = {
+  blue: {
+    fill: "rgba(34, 211, 238, 0.08)",
+    outerBorder: "rgba(9, 86, 108, 0.95)",
+    innerBorder: "rgba(195, 248, 255, 0.98)",
+  },
+  red: {
+    fill: "rgba(251, 113, 133, 0.08)",
+    outerBorder: "rgba(116, 31, 54, 0.95)",
+    innerBorder: "rgba(255, 221, 228, 0.98)",
+  },
 };
 
 const TERRAIN_FALLBACK_COLORS = {
@@ -56,7 +86,7 @@ const TERRAIN_FALLBACK_COLORS = {
   "Snow+Hill": "#dce9f3",
 };
 
-const CITIES = [
+const DEFAULT_CITIES = [
   { id: "city-blue", centerCol: 6, centerRow: 6, owner: "blue" },
   { id: "city-red", centerCol: 33, centerRow: 22, owner: "red" },
 ];
@@ -100,17 +130,8 @@ function buildTerrainGrid(terrainTiles = []) {
 }
 
 function getCityHexes(city) {
-  return getHexesInRange(city.centerCol, city.centerRow, 1, GRID_COLS, GRID_ROWS);
+  return getHexesInRange(city.centerCol, city.centerRow, CITY_BORDER_RANGE, GRID_COLS, GRID_ROWS);
 }
-
-const CITY_HEX_MAP = new Map();
-for (const city of CITIES) {
-  for (const hex of getCityHexes(city)) {
-    CITY_HEX_MAP.set(`${hex.col},${hex.row}`, city.owner);
-  }
-}
-
-const CITY_CENTER_SET = new Set(CITIES.map((city) => `${city.centerCol},${city.centerRow}`));
 
 function drawHexPath(ctx, cx, cy, size) {
   const corners = hexCorners(cx, cy, size);
@@ -120,6 +141,31 @@ function drawHexPath(ctx, cx, cy, size) {
     ctx.lineTo(corners[i].x, corners[i].y);
   }
   ctx.closePath();
+}
+
+function getHexKey(col, row) {
+  return `${col},${row}`;
+}
+
+function getAngularDifference(a, b) {
+  const diff = Math.abs(a - b) % (Math.PI * 2);
+  return diff > Math.PI ? Math.PI * 2 - diff : diff;
+}
+
+function getSideIndexForNeighborVector(dx, dy) {
+  const angle = Math.atan2(dy, dx);
+  let bestIndex = 0;
+  let smallestDiff = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < HEX_SIDE_ANGLES.length; index += 1) {
+    const diff = getAngularDifference(angle, HEX_SIDE_ANGLES[index]);
+    if (diff < smallestDiff) {
+      smallestDiff = diff;
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
 }
 
 function drawTerrainTile(ctx, tileImages, terrainTile, sx, sy, col, row) {
@@ -160,11 +206,68 @@ function drawTerrainTile(ctx, tileImages, terrainTile, sx, sy, col, row) {
   );
 }
 
-function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages) {
+function drawSprite(ctx, spriteImages, assetKey, sx, sy, {
+  scale = 1,
+  offsetX = 0,
+  offsetY = 0,
+  alpha = 1,
+} = {}) {
+  if (!assetKey) {
+    return;
+  }
+
+  const sprite = spriteImages.get(assetKey);
+  if (!sprite?.complete || sprite.naturalWidth === 0 || sprite.naturalHeight === 0) {
+    return;
+  }
+
+  const width = sprite.naturalWidth * scale;
+  const height = sprite.naturalHeight * scale;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(
+    sprite,
+    sx - width / 2 + offsetX,
+    sy - height / 2 + offsetY,
+    width,
+    height,
+  );
+  ctx.restore();
+}
+
+function drawTerritoryBorderSegment(ctx, sx, sy, sideIndex, theme) {
+  const corners = hexCorners(sx, sy, HEX_SIZE - 0.6);
+  const [startIndex, endIndex] = HEX_SIDE_SEGMENTS[sideIndex];
+  const start = corners[startIndex];
+  const end = corners[endIndex];
+
+  ctx.save();
+  ctx.lineCap = "round";
+
+  ctx.strokeStyle = theme.outerBorder;
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+
+  ctx.strokeStyle = theme.innerBorder;
+  ctx.lineWidth = 4.2;
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages, cityHexMap, cityCenterSet) {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, vw, vh);
 
   const margin = HEX_SIZE * 2;
+  const visibleTiles = [];
 
   for (let col = 0; col < GRID_COLS; col += 1) {
     for (let row = 0; row < GRID_ROWS; row += 1) {
@@ -180,36 +283,79 @@ function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages) {
 
       const sx = wx - camera.x;
       const sy = wy - camera.y;
-      const key = `${col},${row}`;
-      const cityOwner = CITY_HEX_MAP.get(key);
-      const isCenter = CITY_CENTER_SET.has(key);
-      const terrainTile = terrainGrid[getTerrainIndex(col, row)];
+      const key = getHexKey(col, row);
+      visibleTiles.push({
+        col,
+        row,
+        key,
+        sx,
+        sy,
+        owner: cityHexMap.get(key) ?? null,
+        isCenter: cityCenterSet.has(key),
+        terrainTile: terrainGrid[getTerrainIndex(col, row)],
+      });
+    }
+  }
 
-      drawTerrainTile(ctx, tileImages, terrainTile, sx, sy, col, row);
+  for (const tile of visibleTiles) {
+    drawTerrainTile(ctx, tileImages, tile.terrainTile, tile.sx, tile.sy, tile.col, tile.row);
 
-      if (cityOwner) {
-        ctx.fillStyle = cityOwner === "blue" ? COLORS.cityBlue : COLORS.cityRed;
-        ctx.strokeStyle = cityOwner === "blue" ? COLORS.cityBlueBorder : COLORS.cityRedBorder;
-        ctx.lineWidth = isCenter ? 2.5 : 1.8;
-        drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
-        ctx.fill();
-        ctx.stroke();
-      } else {
-        ctx.strokeStyle = COLORS.hexStroke;
-        ctx.lineWidth = 1;
-        drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
-        ctx.stroke();
+    if (tile.owner) {
+      const ownerTheme = OWNER_THEMES[tile.owner] ?? OWNER_THEMES.blue;
+      ctx.fillStyle = ownerTheme.fill;
+      drawHexPath(ctx, tile.sx, tile.sy, HEX_SIZE - 1);
+      ctx.fill();
+    }
+
+    if (tile.terrainTile?.improvementSpriteKey) {
+      drawSprite(ctx, tileImages, tile.terrainTile.improvementSpriteKey, tile.sx, tile.sy, {
+        scale: tile.terrainTile.improvementType === "mine" ? 0.92 : 1,
+      });
+      drawSprite(ctx, tileImages, tile.terrainTile.resourceSpriteKey, tile.sx, tile.sy, {
+        scale: 0.72,
+        offsetX: -15,
+        offsetY: -14,
+      });
+    } else if (tile.terrainTile?.resourceSpriteKey) {
+      drawSprite(ctx, tileImages, tile.terrainTile.resourceSpriteKey, tile.sx, tile.sy, {
+        scale: 1,
+      });
+    }
+
+    if (tile.isCenter) {
+      drawSprite(ctx, tileImages, "City center-Atomic era", tile.sx, tile.sy, {
+        scale: 1,
+      });
+    }
+  }
+
+  ctx.strokeStyle = COLORS.hexStroke;
+  ctx.lineWidth = 1;
+  for (const tile of visibleTiles) {
+    drawHexPath(ctx, tile.sx, tile.sy, HEX_SIZE - 1);
+    ctx.stroke();
+  }
+
+  for (const tile of visibleTiles) {
+    if (!tile.owner) {
+      continue;
+    }
+
+    const ownerTheme = OWNER_THEMES[tile.owner] ?? OWNER_THEMES.blue;
+    const currentPixel = hexToPixel(tile.col, tile.row, HEX_SIZE);
+
+    for (const neighbor of getHexNeighbors(tile.col, tile.row, GRID_COLS, GRID_ROWS)) {
+      const neighborOwner = cityHexMap.get(getHexKey(neighbor.col, neighbor.row)) ?? null;
+      if (neighborOwner === tile.owner) {
+        continue;
       }
 
-      if (isCenter) {
-        const markerColor = cityOwner === "blue" ? COLORS.unitBlue : COLORS.unitRed;
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = markerColor;
-        ctx.fillRect(-5, -5, 10, 10);
-        ctx.restore();
-      }
+      const neighborPixel = hexToPixel(neighbor.col, neighbor.row, HEX_SIZE);
+      const sideIndex = getSideIndexForNeighborVector(
+        neighborPixel.x - currentPixel.x,
+        neighborPixel.y - currentPixel.y,
+      );
+      drawTerritoryBorderSegment(ctx, tile.sx, tile.sy, sideIndex, ownerTheme);
     }
   }
 }
@@ -235,7 +381,7 @@ function drawHoveredHex(ctx, camera, hoveredHex, moveHexSet) {
     return;
   }
 
-  const isLegalMove = moveHexSet?.has(`${hoveredHex.col},${hoveredHex.row}`);
+  const isLegalMove = moveHexSet?.has(getHexKey(hoveredHex.col, hoveredHex.row));
   const { x: wx, y: wy } = hexToPixel(hoveredHex.col, hoveredHex.row, HEX_SIZE);
 
   ctx.strokeStyle = isLegalMove ? "rgba(74, 222, 128, 0.6)" : COLORS.hexStrokeHover;
@@ -377,6 +523,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const terrainImagesRef = useRef(new Map());
 
   const [hexUnits, setHexUnits] = useState(INITIAL_HEX_UNITS);
+  const [cities, setCities] = useState(DEFAULT_CITIES);
   const [terrainGrid, setTerrainGrid] = useState(() => createEmptyTerrainGrid());
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [, setCamera] = useState({ x: 0, y: 0 });
@@ -421,7 +568,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   useEffect(() => {
     const nextImages = new Map();
 
-    for (const [assetKey, src] of Object.entries(HEX_TERRAIN_ASSETS)) {
+    for (const [assetKey, src] of Object.entries({
+      ...HEX_TERRAIN_ASSETS,
+      ...HEX_SPRITE_ASSETS,
+    })) {
       const image = new Image();
       image.src = src;
       nextImages.set(assetKey, image);
@@ -438,6 +588,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     function applyState(snapshot) {
       if (Array.isArray(snapshot?.terrainTiles)) {
         setTerrainGrid(buildTerrainGrid(snapshot.terrainTiles));
+      }
+
+      if (Array.isArray(snapshot?.cities)) {
+        setCities(snapshot.cities);
       }
 
       if (Array.isArray(snapshot?.hexUnits)) {
@@ -560,26 +714,77 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     [hexUnits, selectedUnitId],
   );
 
+  const cityHexMap = useMemo(() => {
+    const nextMap = new Map();
+
+    for (const city of cities) {
+      for (const hex of getCityHexes(city)) {
+        nextMap.set(getHexKey(hex.col, hex.row), city.owner);
+      }
+    }
+
+    return nextMap;
+  }, [cities]);
+
+  const cityCenterSet = useMemo(
+    () => new Set(cities.map((city) => getHexKey(city.centerCol, city.centerRow))),
+    [cities],
+  );
+
   const moveHexes = useMemo(
-    () => (
-      selectedUnit && selectedUnit.owner === playerColor && !movedUnitIds.has(selectedUnit.id)
-        ? getHexesInRange(selectedUnit.col, selectedUnit.row, MOVEMENT_RANGE, GRID_COLS, GRID_ROWS)
-        : []
-    ),
-    [movedUnitIds, playerColor, selectedUnit],
+    () => {
+      if (!selectedUnit || selectedUnit.owner !== playerColor || movedUnitIds.has(selectedUnit.id)) {
+        return [];
+      }
+
+      const blockedHexKeys = new Set(
+        hexUnits
+          .filter((unit) => unit.id !== selectedUnit.id)
+          .map((unit) => getHexKey(unit.col, unit.row)),
+      );
+
+      for (const [unitId, move] of pendingMoves) {
+        if (unitId === selectedUnit.id) {
+          continue;
+        }
+
+        blockedHexKeys.add(getHexKey(move.toCol, move.toRow));
+      }
+
+      return getTraversableHexesInRange(
+        selectedUnit.col,
+        selectedUnit.row,
+        MOVEMENT_RANGE,
+        GRID_COLS,
+        GRID_ROWS,
+        (col, row) => {
+          const terrainTile = terrainGrid[getTerrainIndex(col, row)];
+          if (!terrainTile || terrainTile.isWater) {
+            return false;
+          }
+
+          return !blockedHexKeys.has(getHexKey(col, row));
+        },
+      );
+    },
+    [hexUnits, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
   );
 
   const moveHexSet = useMemo(
-    () => new Set(moveHexes.map((hex) => `${hex.col},${hex.row}`)),
+    () => new Set(moveHexes.map((hex) => getHexKey(hex.col, hex.row))),
     [moveHexes],
   );
 
+  const cityHexMapRef = useRef(cityHexMap);
+  const cityCenterSetRef = useRef(cityCenterSet);
   const moveHexesRef = useRef(moveHexes);
   const moveHexSetRef = useRef(moveHexSet);
   useEffect(() => {
+    cityHexMapRef.current = cityHexMap;
+    cityCenterSetRef.current = cityCenterSet;
     moveHexesRef.current = moveHexes;
     moveHexSetRef.current = moveHexSet;
-  }, [moveHexes, moveHexSet]);
+  }, [cityCenterSet, cityHexMap, moveHexes, moveHexSet]);
 
   const clampCam = useCallback((nextCamera) => {
     const maxX = Math.max(0, HEX_WORLD_WIDTH - (windowSize?.width || 800));
@@ -689,7 +894,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       return;
     }
 
-    if (currentSelection && moveHexSetRef.current.has(`${clickedHex.col},${clickedHex.row}`)) {
+    if (currentSelection && moveHexSetRef.current.has(getHexKey(clickedHex.col, clickedHex.row))) {
       const occupied = hexUnitsRef.current.some(
         (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
       );
@@ -802,7 +1007,16 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       const currentCamera = cameraRef.current;
       const renderTime = performance.now();
 
-      drawGrid(ctx, currentCamera, viewportWidth, viewportHeight, terrainGridRef.current, terrainImagesRef.current);
+      drawGrid(
+        ctx,
+        currentCamera,
+        viewportWidth,
+        viewportHeight,
+        terrainGridRef.current,
+        terrainImagesRef.current,
+        cityHexMapRef.current,
+        cityCenterSetRef.current,
+      );
       drawMovementOverlay(ctx, currentCamera, moveHexesRef.current);
       drawHoveredHex(ctx, currentCamera, hoveredHexRef.current, moveHexSetRef.current);
       drawPendingMoves(ctx, currentCamera, pendingMovesRef.current, hexUnitsRef.current, renderTime);

@@ -16,5 +16,15 @@ export const HEX_TERRAIN_ASSETS = {
   Atoll: "/assets/tiles/GameTiles/Atoll.png",
 };
 
+export const HEX_SPRITE_ASSETS = {
+  "City center-Atomic era": "/assets/tiles/GameTiles/City center-Atomic era.png",
+  Wheat: "/assets/tiles/GameTiles/Wheat.png",
+  Iron: "/assets/tiles/GameTiles/Iron.png",
+  Oil: "/assets/tiles/GameTiles/Oil.png",
+  "Farm+Wheat": "/assets/tiles/GameTiles/Farm+Wheat.png",
+  Mine: "/assets/tiles/GameTiles/Mine-Industrial era.png",
+  "Oil+Oil well": "/assets/tiles/GameTiles/Oil+Oil well.png",
+};
+
 export const HEX_BASE_TILE_WIDTH = 64;
 export const HEX_BASE_TILE_HEIGHT = 56;
