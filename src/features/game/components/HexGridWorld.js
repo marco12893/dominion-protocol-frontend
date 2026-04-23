@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  hexToPixel, pixelToHex, hexCorners, hexDistance, getHexesInRange,
+  hexToPixel, pixelToHex, hexCorners, getHexesInRange,
 } from "@/features/game/utils/hexMath";
+import {
+  HEX_BASE_TILE_HEIGHT,
+  HEX_BASE_TILE_WIDTH,
+  HEX_TERRAIN_ASSETS,
+} from "@/features/game/constants/hexTerrainAssets";
 
-// ─── Grid constants ──────────────────────────────────────────────────────────
-const HEX_SIZE = 36;
+const HEX_SIZE = 32;
 const GRID_COLS = 40;
 const GRID_ROWS = 30;
 const WORLD_PADDING = HEX_SIZE * 2;
@@ -14,6 +18,8 @@ const LAST_HEX = hexToPixel(GRID_COLS - 1, GRID_ROWS - 1, HEX_SIZE);
 const HEX_WORLD_WIDTH = LAST_HEX.x + HEX_SIZE * 2 + WORLD_PADDING;
 const HEX_WORLD_HEIGHT = LAST_HEX.y + HEX_SIZE * 2 + WORLD_PADDING;
 const MOVEMENT_RANGE = 2;
+const TILE_HALF_WIDTH = HEX_BASE_TILE_WIDTH / 2;
+const TILE_HALF_HEIGHT = HEX_BASE_TILE_HEIGHT / 2;
 
 const COLORS = {
   bg: "#1a2332",
@@ -34,27 +40,27 @@ const COLORS = {
   dimAlpha: 0.35,
 };
 
-// ─── Cities ──────────────────────────────────────────────────────────────────
+const TERRAIN_FALLBACK_COLORS = {
+  Ocean: "#69b8d2",
+  Coast: "#8fd6e5",
+  Lakes: "#6fc8dd",
+  Grassland: "#7ba64b",
+  "Grassland+Hill": "#7ba64b",
+  Plains: "#9cae66",
+  "Plains+Hill": "#9cae66",
+  Desert: "#cab16a",
+  "Desert+Hill": "#cab16a",
+  Tundra: "#93a496",
+  "Tundra+Hill": "#93a496",
+  Snow: "#dce9f3",
+  "Snow+Hill": "#dce9f3",
+};
+
 const CITIES = [
   { id: "city-blue", centerCol: 6, centerRow: 6, owner: "blue" },
   { id: "city-red", centerCol: 33, centerRow: 22, owner: "red" },
 ];
 
-function getCityHexes(city) {
-  return getHexesInRange(city.centerCol, city.centerRow, 1, GRID_COLS, GRID_ROWS);
-}
-
-// Precompute city hex lookup
-const CITY_HEX_MAP = new Map();
-for (const city of CITIES) {
-  for (const h of getCityHexes(city)) {
-    CITY_HEX_MAP.set(`${h.col},${h.row}`, city.owner);
-  }
-}
-
-const CITY_CENTER_SET = new Set(CITIES.map((c) => `${c.centerCol},${c.centerRow}`));
-
-// ─── Initial units ───────────────────────────────────────────────────────────
 const INITIAL_HEX_UNITS = [
   { id: "hex-u1", col: 5, row: 4, owner: "blue" },
   { id: "hex-u2", col: 8, row: 8, owner: "blue" },
@@ -64,50 +70,143 @@ const INITIAL_HEX_UNITS = [
   { id: "hex-u6", col: 30, row: 24, owner: "red" },
 ];
 
-// ─── Drawing helpers ─────────────────────────────────────────────────────────
+function getTerrainIndex(col, row) {
+  return row * GRID_COLS + col;
+}
+
+function createEmptyTerrainGrid() {
+  return Array.from({ length: GRID_COLS * GRID_ROWS }, () => null);
+}
+
+function buildTerrainGrid(terrainTiles = []) {
+  const grid = createEmptyTerrainGrid();
+
+  for (const tile of terrainTiles) {
+    if (
+      typeof tile?.col !== "number" ||
+      typeof tile?.row !== "number" ||
+      tile.col < 0 ||
+      tile.col >= GRID_COLS ||
+      tile.row < 0 ||
+      tile.row >= GRID_ROWS
+    ) {
+      continue;
+    }
+
+    grid[getTerrainIndex(tile.col, tile.row)] = tile;
+  }
+
+  return grid;
+}
+
+function getCityHexes(city) {
+  return getHexesInRange(city.centerCol, city.centerRow, 1, GRID_COLS, GRID_ROWS);
+}
+
+const CITY_HEX_MAP = new Map();
+for (const city of CITIES) {
+  for (const hex of getCityHexes(city)) {
+    CITY_HEX_MAP.set(`${hex.col},${hex.row}`, city.owner);
+  }
+}
+
+const CITY_CENTER_SET = new Set(CITIES.map((city) => `${city.centerCol},${city.centerRow}`));
+
 function drawHexPath(ctx, cx, cy, size) {
   const corners = hexCorners(cx, cy, size);
   ctx.beginPath();
   ctx.moveTo(corners[0].x, corners[0].y);
-  for (let i = 1; i < 6; i++) ctx.lineTo(corners[i].x, corners[i].y);
+  for (let i = 1; i < 6; i += 1) {
+    ctx.lineTo(corners[i].x, corners[i].y);
+  }
   ctx.closePath();
 }
 
-function drawGrid(ctx, camera, vw, vh) {
+function drawTerrainTile(ctx, tileImages, terrainTile, sx, sy, col, row) {
+  const fallbackColor = terrainTile?.baseAssetKey
+    ? TERRAIN_FALLBACK_COLORS[terrainTile.baseAssetKey]
+    : ((col + row) % 2 === 0 ? COLORS.hexFill : COLORS.hexFillAlt);
+  const baseImage = terrainTile?.baseAssetKey ? tileImages.get(terrainTile.baseAssetKey) : null;
+
+  if (baseImage?.complete && baseImage.naturalWidth > 0) {
+    ctx.drawImage(
+      baseImage,
+      sx - TILE_HALF_WIDTH,
+      sy - TILE_HALF_HEIGHT,
+      HEX_BASE_TILE_WIDTH,
+      HEX_BASE_TILE_HEIGHT,
+    );
+  } else {
+    ctx.fillStyle = fallbackColor;
+    drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
+    ctx.fill();
+  }
+
+  if (!terrainTile?.overlayAssetKey) {
+    return;
+  }
+
+  const overlayImage = tileImages.get(terrainTile.overlayAssetKey);
+  if (!overlayImage?.complete || overlayImage.naturalWidth === 0) {
+    return;
+  }
+
+  ctx.drawImage(
+    overlayImage,
+    sx - overlayImage.naturalWidth / 2,
+    sy - overlayImage.naturalHeight / 2,
+    overlayImage.naturalWidth,
+    overlayImage.naturalHeight,
+  );
+}
+
+function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages) {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, vw, vh);
+
   const margin = HEX_SIZE * 2;
 
-  for (let col = 0; col < GRID_COLS; col++) {
-    for (let row = 0; row < GRID_ROWS; row++) {
+  for (let col = 0; col < GRID_COLS; col += 1) {
+    for (let row = 0; row < GRID_ROWS; row += 1) {
       const { x: wx, y: wy } = hexToPixel(col, row, HEX_SIZE);
-      if (wx < camera.x - margin || wx > camera.x + vw + margin ||
-          wy < camera.y - margin || wy > camera.y + vh + margin) continue;
-      const sx = wx - camera.x, sy = wy - camera.y;
+      if (
+        wx < camera.x - margin ||
+        wx > camera.x + vw + margin ||
+        wy < camera.y - margin ||
+        wy > camera.y + vh + margin
+      ) {
+        continue;
+      }
+
+      const sx = wx - camera.x;
+      const sy = wy - camera.y;
       const key = `${col},${row}`;
       const cityOwner = CITY_HEX_MAP.get(key);
       const isCenter = CITY_CENTER_SET.has(key);
+      const terrainTile = terrainGrid[getTerrainIndex(col, row)];
+
+      drawTerrainTile(ctx, tileImages, terrainTile, sx, sy, col, row);
 
       if (cityOwner) {
         ctx.fillStyle = cityOwner === "blue" ? COLORS.cityBlue : COLORS.cityRed;
         ctx.strokeStyle = cityOwner === "blue" ? COLORS.cityBlueBorder : COLORS.cityRedBorder;
         ctx.lineWidth = isCenter ? 2.5 : 1.8;
+        drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
+        ctx.fill();
+        ctx.stroke();
       } else {
-        ctx.fillStyle = (col + row) % 2 === 0 ? COLORS.hexFill : COLORS.hexFillAlt;
         ctx.strokeStyle = COLORS.hexStroke;
         ctx.lineWidth = 1;
+        drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
+        ctx.stroke();
       }
-      drawHexPath(ctx, sx, sy, HEX_SIZE - 1);
-      ctx.fill();
-      ctx.stroke();
 
-      // City center marker
       if (isCenter) {
-        const c = cityOwner === "blue" ? COLORS.unitBlue : COLORS.unitRed;
+        const markerColor = cityOwner === "blue" ? COLORS.unitBlue : COLORS.unitRed;
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = c;
+        ctx.fillStyle = markerColor;
         ctx.fillRect(-5, -5, 10, 10);
         ctx.restore();
       }
@@ -116,7 +215,10 @@ function drawGrid(ctx, camera, vw, vh) {
 }
 
 function drawMovementOverlay(ctx, camera, moveHexes) {
-  if (!moveHexes || !moveHexes.length) return;
+  if (!moveHexes?.length) {
+    return;
+  }
+
   for (const hex of moveHexes) {
     const { x: wx, y: wy } = hexToPixel(hex.col, hex.row, HEX_SIZE);
     ctx.fillStyle = COLORS.moveFill;
@@ -128,11 +230,15 @@ function drawMovementOverlay(ctx, camera, moveHexes) {
   }
 }
 
-function drawHoveredHex(ctx, camera, hov, moveHexSet) {
-  if (!hov) return;
-  const legal = moveHexSet && moveHexSet.has(`${hov.col},${hov.row}`);
-  const { x: wx, y: wy } = hexToPixel(hov.col, hov.row, HEX_SIZE);
-  ctx.strokeStyle = legal ? "rgba(74, 222, 128, 0.6)" : COLORS.hexStrokeHover;
+function drawHoveredHex(ctx, camera, hoveredHex, moveHexSet) {
+  if (!hoveredHex) {
+    return;
+  }
+
+  const isLegalMove = moveHexSet?.has(`${hoveredHex.col},${hoveredHex.row}`);
+  const { x: wx, y: wy } = hexToPixel(hoveredHex.col, hoveredHex.row, HEX_SIZE);
+
+  ctx.strokeStyle = isLegalMove ? "rgba(74, 222, 128, 0.6)" : COLORS.hexStrokeHover;
   ctx.lineWidth = 2;
   drawHexPath(ctx, wx - camera.x, wy - camera.y, HEX_SIZE - 1);
   ctx.stroke();
@@ -140,18 +246,23 @@ function drawHoveredHex(ctx, camera, hov, moveHexSet) {
 
 function drawPendingMoves(ctx, camera, pendingMoves, units, renderTime) {
   for (const [unitId, move] of pendingMoves) {
-    const unit = units.find((u) => u.id === unitId);
-    if (!unit) continue;
+    const unit = units.find((entry) => entry.id === unitId);
+    if (!unit) {
+      continue;
+    }
+
     const from = hexToPixel(unit.col, unit.row, HEX_SIZE);
     const to = hexToPixel(move.toCol, move.toRow, HEX_SIZE);
-    const fx = from.x - camera.x, fy = from.y - camera.y;
-    const tx = to.x - camera.x, ty = to.y - camera.y;
+    const fx = from.x - camera.x;
+    const fy = from.y - camera.y;
+    const tx = to.x - camera.x;
+    const ty = to.y - camera.y;
 
-    // Dashed arrow line
     ctx.save();
     ctx.setLineDash([6, 4]);
     ctx.strokeStyle = unit.owner === "blue"
-      ? "rgba(34, 211, 238, 0.5)" : "rgba(251, 113, 133, 0.5)";
+      ? "rgba(34, 211, 238, 0.5)"
+      : "rgba(251, 113, 133, 0.5)";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(fx, fy);
@@ -159,7 +270,6 @@ function drawPendingMoves(ctx, camera, pendingMoves, units, renderTime) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Arrowhead
     const angle = Math.atan2(ty - fy, tx - fx);
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
@@ -170,7 +280,6 @@ function drawPendingMoves(ctx, camera, pendingMoves, units, renderTime) {
     ctx.fill();
     ctx.restore();
 
-    // Ghost dot at destination
     const pulse = 0.4 + 0.3 * Math.sin(renderTime * 0.005);
     const color = unit.owner === "blue" ? COLORS.unitBlue : COLORS.unitRed;
     ctx.globalAlpha = pulse;
@@ -185,13 +294,15 @@ function drawPendingMoves(ctx, camera, pendingMoves, units, renderTime) {
 function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds, playerColor) {
   for (const unit of units) {
     const { x: wx, y: wy } = hexToPixel(unit.col, unit.row, HEX_SIZE);
-    let sx, sy;
+    let sx;
+    let sy;
+
     if (unit._animFrom) {
-      const fp = hexToPixel(unit._animFrom.col, unit._animFrom.row, HEX_SIZE);
-      const t = Math.min(1, (renderTime - unit._animStart) / 300);
-      const e = 1 - (1 - t) * (1 - t);
-      sx = fp.x + (wx - fp.x) * e - camera.x;
-      sy = fp.y + (wy - fp.y) * e - camera.y;
+      const fromPixel = hexToPixel(unit._animFrom.col, unit._animFrom.row, HEX_SIZE);
+      const progress = Math.min(1, (renderTime - unit._animStart) / 300);
+      const eased = 1 - (1 - progress) * (1 - progress);
+      sx = fromPixel.x + (wx - fromPixel.x) * eased - camera.x;
+      sy = fromPixel.y + (wy - fromPixel.y) * eased - camera.y;
     } else {
       sx = wx - camera.x;
       sy = wy - camera.y;
@@ -201,48 +312,51 @@ function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds,
     const hasMoved = movedUnitIds.has(unit.id);
     const isOwned = unit.owner === playerColor;
 
-    // Dim units that already have a pending move
-    if (hasMoved && isOwned) ctx.globalAlpha = COLORS.dimAlpha;
+    if (hasMoved && isOwned) {
+      ctx.globalAlpha = COLORS.dimAlpha;
+    }
 
-    // Selection ring
     if (isSelected) {
       ctx.strokeStyle = COLORS.selectedRing;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(sx, sy, COLORS.unitDotRadius + 6, 0, Math.PI * 2);
       ctx.stroke();
-      const p = 0.5 + 0.5 * Math.sin(renderTime * 0.004);
-      ctx.strokeStyle = `rgba(252, 211, 77, ${0.25 + 0.25 * p})`;
+
+      const pulse = 0.5 + 0.5 * Math.sin(renderTime * 0.004);
+      ctx.strokeStyle = `rgba(252, 211, 77, ${0.25 + 0.25 * pulse})`;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(sx, sy, COLORS.unitDotRadius + 10 + p * 3, 0, Math.PI * 2);
+      ctx.arc(sx, sy, COLORS.unitDotRadius + 10 + pulse * 3, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Unit dot
     const color = unit.owner === "blue" ? COLORS.unitBlue : COLORS.unitRed;
-    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, COLORS.unitDotRadius);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, color + "88");
-    ctx.fillStyle = grad;
+    const gradient = ctx.createRadialGradient(sx, sy, 0, sx, sy, COLORS.unitDotRadius);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(1, `${color}88`);
+    ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(sx, sy, COLORS.unitDotRadius, 0, Math.PI * 2);
     ctx.fill();
+
     ctx.fillStyle = "rgba(255,255,255,0.7)";
     ctx.beginPath();
     ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = color + "55";
+
+    ctx.strokeStyle = `${color}55`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(sx, sy, COLORS.unitDotRadius + 2, 0, Math.PI * 2);
     ctx.stroke();
 
-    if (hasMoved && isOwned) ctx.globalAlpha = 1;
+    if (hasMoved && isOwned) {
+      ctx.globalAlpha = 1;
+    }
   }
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
 const TURN_RESOLVE_ANIMATION_MS = 400;
 
 function toPendingMoveMap(pendingMoves = {}) {
@@ -260,10 +374,12 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const cameraRef = useRef({ x: 0, y: 0 });
   const keysRef = useRef({ ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false });
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const terrainImagesRef = useRef(new Map());
 
   const [hexUnits, setHexUnits] = useState(INITIAL_HEX_UNITS);
+  const [terrainGrid, setTerrainGrid] = useState(() => createEmptyTerrainGrid());
   const [selectedUnitId, setSelectedUnitId] = useState(null);
-  const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [, setCamera] = useState({ x: 0, y: 0 });
   const [hoveredHex, setHoveredHex] = useState(null);
   const [pendingMoves, setPendingMoves] = useState(new Map());
   const [turnNumber, setTurnNumber] = useState(1);
@@ -271,24 +387,59 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const [opponentReady, setOpponentReady] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
 
-  // Refs for render loop
   const hexUnitsRef = useRef(hexUnits);
-  useEffect(() => { hexUnitsRef.current = hexUnits; }, [hexUnits]);
+  useEffect(() => {
+    hexUnitsRef.current = hexUnits;
+  }, [hexUnits]);
+
+  const terrainGridRef = useRef(terrainGrid);
+  useEffect(() => {
+    terrainGridRef.current = terrainGrid;
+  }, [terrainGrid]);
+
   const selectedUnitIdRef = useRef(selectedUnitId);
-  useEffect(() => { selectedUnitIdRef.current = selectedUnitId; }, [selectedUnitId]);
+  useEffect(() => {
+    selectedUnitIdRef.current = selectedUnitId;
+  }, [selectedUnitId]);
+
   const hoveredHexRef = useRef(hoveredHex);
-  useEffect(() => { hoveredHexRef.current = hoveredHex; }, [hoveredHex]);
+  useEffect(() => {
+    hoveredHexRef.current = hoveredHex;
+  }, [hoveredHex]);
+
   const pendingMovesRef = useRef(pendingMoves);
-  useEffect(() => { pendingMovesRef.current = pendingMoves; }, [pendingMoves]);
+  useEffect(() => {
+    pendingMovesRef.current = pendingMoves;
+  }, [pendingMoves]);
 
   const movedUnitIds = useMemo(() => new Set(pendingMoves.keys()), [pendingMoves]);
   const movedUnitIdsRef = useRef(movedUnitIds);
-  useEffect(() => { movedUnitIdsRef.current = movedUnitIds; }, [movedUnitIds]);
+  useEffect(() => {
+    movedUnitIdsRef.current = movedUnitIds;
+  }, [movedUnitIds]);
 
   useEffect(() => {
-    if (!socket) return undefined;
+    const nextImages = new Map();
+
+    for (const [assetKey, src] of Object.entries(HEX_TERRAIN_ASSETS)) {
+      const image = new Image();
+      image.src = src;
+      nextImages.set(assetKey, image);
+    }
+
+    terrainImagesRef.current = nextImages;
+  }, []);
+
+  useEffect(() => {
+    if (!socket) {
+      return undefined;
+    }
 
     function applyState(snapshot) {
+      if (Array.isArray(snapshot?.terrainTiles)) {
+        setTerrainGrid(buildTerrainGrid(snapshot.terrainTiles));
+      }
+
       if (Array.isArray(snapshot?.hexUnits)) {
         setHexUnits(snapshot.hexUnits);
       }
@@ -299,9 +450,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
 
       const readyPlayers = Array.isArray(snapshot?.readyPlayers) ? snapshot.readyPlayers : [];
       setPlayerReady(Boolean(playerColor) && readyPlayers.includes(playerColor));
-      setOpponentReady(
-        Boolean(playerColor) && readyPlayers.some((color) => color !== playerColor),
-      );
+      setOpponentReady(Boolean(playerColor) && readyPlayers.some((color) => color !== playerColor));
       setIsResolving(Boolean(snapshot?.isResolving));
 
       if (playerColor) {
@@ -321,7 +470,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
 
     function handleMoveCancelled({ unitId }) {
       setPendingMoves((prev) => {
-        if (!prev.has(unitId)) return prev;
+        if (!prev.has(unitId)) {
+          return prev;
+        }
+
         const next = new Map(prev);
         next.delete(unitId);
         return next;
@@ -329,7 +481,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     }
 
     function handlePlayerReady({ playerColor: readyColor }) {
-      if (!playerColor) return;
+      if (!playerColor) {
+        return;
+      }
+
       if (readyColor === playerColor) {
         setPlayerReady(true);
       } else {
@@ -338,7 +493,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     }
 
     function handlePlayerUnready({ playerColor: readyColor }) {
-      if (!playerColor) return;
+      if (!playerColor) {
+        return;
+      }
+
       if (readyColor === playerColor) {
         setPlayerReady(false);
       } else {
@@ -358,7 +516,9 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
 
       setHexUnits((prev) => prev.map((unit) => {
         const appliedMove = appliedMoves.find((move) => move.unitId === unit.id);
-        if (!appliedMove) return unit;
+        if (!appliedMove) {
+          return unit;
+        }
 
         return {
           ...unit,
@@ -395,11 +555,11 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     };
   }, [playerColor, socket]);
 
-  // Selected unit & movement range
   const selectedUnit = useMemo(
-    () => hexUnits.find((u) => u.id === selectedUnitId) || null,
+    () => hexUnits.find((unit) => unit.id === selectedUnitId) || null,
     [hexUnits, selectedUnitId],
   );
+
   const moveHexes = useMemo(
     () => (
       selectedUnit && selectedUnit.owner === playerColor && !movedUnitIds.has(selectedUnit.id)
@@ -408,70 +568,117 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     ),
     [movedUnitIds, playerColor, selectedUnit],
   );
+
   const moveHexSet = useMemo(
-    () => new Set(moveHexes.map((h) => `${h.col},${h.row}`)),
+    () => new Set(moveHexes.map((hex) => `${hex.col},${hex.row}`)),
     [moveHexes],
   );
+
   const moveHexesRef = useRef(moveHexes);
   const moveHexSetRef = useRef(moveHexSet);
-  useEffect(() => { moveHexesRef.current = moveHexes; moveHexSetRef.current = moveHexSet; }, [moveHexes, moveHexSet]);
+  useEffect(() => {
+    moveHexesRef.current = moveHexes;
+    moveHexSetRef.current = moveHexSet;
+  }, [moveHexes, moveHexSet]);
 
-  // Camera
-  const clampCam = useCallback((cam) => {
+  const clampCam = useCallback((nextCamera) => {
     const maxX = Math.max(0, HEX_WORLD_WIDTH - (windowSize?.width || 800));
     const maxY = Math.max(0, HEX_WORLD_HEIGHT - (windowSize?.height || 600));
-    return { x: Math.max(0, Math.min(maxX, cam.x)), y: Math.max(0, Math.min(maxY, cam.y)) };
+
+    return {
+      x: Math.max(0, Math.min(maxX, nextCamera.x)),
+      y: Math.max(0, Math.min(maxY, nextCamera.y)),
+    };
   }, [windowSize]);
 
   useEffect(() => {
-    const onKD = (e) => { if (e.key in keysRef.current) keysRef.current[e.key] = true; };
-    const onKU = (e) => { if (e.key in keysRef.current) keysRef.current[e.key] = false; };
-    window.addEventListener("keydown", onKD);
-    window.addEventListener("keyup", onKU);
-    return () => { window.removeEventListener("keydown", onKD); window.removeEventListener("keyup", onKU); };
+    const onKeyDown = (event) => {
+      if (event.key in keysRef.current) {
+        keysRef.current[event.key] = true;
+      }
+    };
+    const onKeyUp = (event) => {
+      if (event.key in keysRef.current) {
+        keysRef.current[event.key] = false;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, []);
 
   useEffect(() => {
-    function onMM(e) {
-      mousePosRef.current = { x: e.clientX, y: e.clientY };
-      const cam = cameraRef.current;
-      const hex = pixelToHex(e.clientX + cam.x, e.clientY + cam.y, HEX_SIZE);
-      if (hex.col >= 0 && hex.col < GRID_COLS && hex.row >= 0 && hex.row < GRID_ROWS)
+    function onMouseMove(event) {
+      mousePosRef.current = { x: event.clientX, y: event.clientY };
+      const currentCamera = cameraRef.current;
+      const hex = pixelToHex(event.clientX + currentCamera.x, event.clientY + currentCamera.y, HEX_SIZE);
+
+      if (hex.col >= 0 && hex.col < GRID_COLS && hex.row >= 0 && hex.row < GRID_ROWS) {
         setHoveredHex({ col: hex.col, row: hex.row });
-      else setHoveredHex(null);
+      } else {
+        setHoveredHex(null);
+      }
     }
-    window.addEventListener("mousemove", onMM);
-    return () => window.removeEventListener("mousemove", onMM);
+
+    window.addEventListener("mousemove", onMouseMove);
+    return () => window.removeEventListener("mousemove", onMouseMove);
   }, []);
 
   useEffect(() => {
-    let rafId; let last = performance.now();
-    function tick(t) {
-      const dt = (t - last) / 1000; last = t;
-      const ps = 700, et = 40; let dx = 0, dy = 0;
-      if (keysRef.current.ArrowUp) dy -= ps * dt;
-      if (keysRef.current.ArrowDown) dy += ps * dt;
-      if (keysRef.current.ArrowLeft) dx -= ps * dt;
-      if (keysRef.current.ArrowRight) dx += ps * dt;
-      const mp = mousePosRef.current;
-      if (mp.x < et) dx -= ps * dt;
-      if (mp.x > window.innerWidth - et) dx += ps * dt;
-      if (mp.y < et) dy -= ps * dt;
-      if (mp.y > window.innerHeight - et) dy += ps * dt;
-      if (dx !== 0 || dy !== 0) setCamera((c) => { const n = clampCam({ x: c.x + dx, y: c.y + dy }); cameraRef.current = n; return n; });
+    let rafId;
+    let lastTime = performance.now();
+
+    function tick(time) {
+      const deltaTime = (time - lastTime) / 1000;
+      lastTime = time;
+
+      const panSpeed = 700;
+      const edgeThreshold = 40;
+      let dx = 0;
+      let dy = 0;
+
+      if (keysRef.current.ArrowUp) dy -= panSpeed * deltaTime;
+      if (keysRef.current.ArrowDown) dy += panSpeed * deltaTime;
+      if (keysRef.current.ArrowLeft) dx -= panSpeed * deltaTime;
+      if (keysRef.current.ArrowRight) dx += panSpeed * deltaTime;
+
+      const mousePos = mousePosRef.current;
+      if (mousePos.x < edgeThreshold) dx -= panSpeed * deltaTime;
+      if (mousePos.x > window.innerWidth - edgeThreshold) dx += panSpeed * deltaTime;
+      if (mousePos.y < edgeThreshold) dy -= panSpeed * deltaTime;
+      if (mousePos.y > window.innerHeight - edgeThreshold) dy += panSpeed * deltaTime;
+
+      if (dx !== 0 || dy !== 0) {
+        setCamera((current) => {
+          const next = clampCam({ x: current.x + dx, y: current.y + dy });
+          cameraRef.current = next;
+          return next;
+        });
+      }
+
       rafId = requestAnimationFrame(tick);
     }
+
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [clampCam]);
 
-  // ─── Click handling ──────────────────────────────────────────────────────
-  function handlePointerDown(e) {
-    if (e.button !== 0 || isResolving || !playerColor || playerReady) return;
-    const cam = cameraRef.current;
-    const clicked = pixelToHex(e.clientX + cam.x, e.clientY + cam.y, HEX_SIZE);
-    const clickedUnit = hexUnitsRef.current.find((u) => u.col === clicked.col && u.row === clicked.row);
-    const curSel = selectedUnitIdRef.current;
+  function handlePointerDown(event) {
+    if (event.button !== 0 || isResolving || !playerColor || playerReady) {
+      return;
+    }
+
+    const currentCamera = cameraRef.current;
+    const clickedHex = pixelToHex(event.clientX + currentCamera.x, event.clientY + currentCamera.y, HEX_SIZE);
+    const clickedUnit = hexUnitsRef.current.find(
+      (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
+    );
+    const currentSelection = selectedUnitIdRef.current;
 
     if (clickedUnit) {
       if (clickedUnit.owner === playerColor) {
@@ -482,128 +689,173 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       return;
     }
 
-    if (curSel && moveHexSetRef.current.has(`${clicked.col},${clicked.row}`)) {
-      const occupied = hexUnitsRef.current.some((u) => u.col === clicked.col && u.row === clicked.row);
-      // Also check no other pending move targets this hex
+    if (currentSelection && moveHexSetRef.current.has(`${clickedHex.col},${clickedHex.row}`)) {
+      const occupied = hexUnitsRef.current.some(
+        (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
+      );
+
       let pendingOccupied = false;
-      for (const [, m] of pendingMovesRef.current) {
-        if (m.toCol === clicked.col && m.toRow === clicked.row) { pendingOccupied = true; break; }
+      for (const [, move] of pendingMovesRef.current) {
+        if (move.toCol === clickedHex.col && move.toRow === clickedHex.row) {
+          pendingOccupied = true;
+          break;
+        }
       }
+
       if (!occupied && !pendingOccupied) {
         socketRef.current?.emit("hex:submitMove", {
-          unitId: curSel,
-          toCol: clicked.col,
-          toRow: clicked.row,
+          unitId: currentSelection,
+          toCol: clickedHex.col,
+          toRow: clickedHex.row,
         });
         setSelectedUnitId(null);
         return;
       }
     }
+
     setSelectedUnitId(null);
   }
 
-  // ─── End Turn ──────────────────────────────────────────────────────────
   function handleEndTurn() {
-    if (playerReady || isResolving) return;
+    if (playerReady || isResolving) {
+      return;
+    }
+
     socketRef.current?.emit("hex:endTurn");
   }
 
   function handleCancelReady() {
-    if (!playerReady || opponentReady || isResolving) return;
+    if (!playerReady || opponentReady || isResolving) {
+      return;
+    }
+
     socketRef.current?.emit("hex:cancelReady");
   }
 
   function handleCancelMove(unitId) {
-    if (!unitId || playerReady || isResolving) return;
+    if (!unitId || playerReady || isResolving) {
+      return;
+    }
+
     socketRef.current?.emit("hex:cancelMove", { unitId });
+
     if (selectedUnitIdRef.current === unitId) {
       setSelectedUnitId(null);
     }
   }
 
-  // Clear animation data
   useEffect(() => {
-    const iv = setInterval(() => {
+    const intervalId = setInterval(() => {
       const now = performance.now();
+
       setHexUnits((prev) => {
         let changed = false;
-        const next = prev.map((u) => {
-          if (u._animFrom && now - u._animStart > 350) {
+        const next = prev.map((unit) => {
+          if (unit._animFrom && now - unit._animStart > 350) {
             changed = true;
-            const { _animFrom, _animStart, ...rest } = u;
+            const { _animFrom, _animStart, ...rest } = unit;
             return rest;
           }
-          return u;
+
+          return unit;
         });
+
         return changed ? next : prev;
       });
     }, 100);
-    return () => clearInterval(iv);
+
+    return () => clearInterval(intervalId);
   }, []);
 
-  // ─── Canvas render loop ────────────────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
-    if (!container || !canvas) return;
+    if (!container || !canvas) {
+      return undefined;
+    }
+
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      return undefined;
+    }
+
     let rafId;
+
     function render() {
-      const vw = container.clientWidth, vh = container.clientHeight;
+      const viewportWidth = container.clientWidth;
+      const viewportHeight = container.clientHeight;
       const dpr = window.devicePixelRatio || 1;
-      const tw = Math.max(1, Math.floor(vw * dpr));
-      const th = Math.max(1, Math.floor(vh * dpr));
-      if (canvas.width !== tw || canvas.height !== th) {
-        canvas.width = tw; canvas.height = th;
-        canvas.style.width = `${vw}px`; canvas.style.height = `${vh}px`;
+      const targetWidth = Math.max(1, Math.floor(viewportWidth * dpr));
+      const targetHeight = Math.max(1, Math.floor(viewportHeight * dpr));
+
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.style.width = `${viewportWidth}px`;
+        canvas.style.height = `${viewportHeight}px`;
       }
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, vw, vh);
-      const cam = cameraRef.current;
-      const rt = performance.now();
-      drawGrid(ctx, cam, vw, vh);
-      drawMovementOverlay(ctx, cam, moveHexesRef.current);
-      drawHoveredHex(ctx, cam, hoveredHexRef.current, moveHexSetRef.current);
-      drawPendingMoves(ctx, cam, pendingMovesRef.current, hexUnitsRef.current, rt);
-      drawUnits(ctx, cam, hexUnitsRef.current, selectedUnitIdRef.current, rt, movedUnitIdsRef.current, playerColor);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, viewportWidth, viewportHeight);
+
+      const currentCamera = cameraRef.current;
+      const renderTime = performance.now();
+
+      drawGrid(ctx, currentCamera, viewportWidth, viewportHeight, terrainGridRef.current, terrainImagesRef.current);
+      drawMovementOverlay(ctx, currentCamera, moveHexesRef.current);
+      drawHoveredHex(ctx, currentCamera, hoveredHexRef.current, moveHexSetRef.current);
+      drawPendingMoves(ctx, currentCamera, pendingMovesRef.current, hexUnitsRef.current, renderTime);
+      drawUnits(
+        ctx,
+        currentCamera,
+        hexUnitsRef.current,
+        selectedUnitIdRef.current,
+        renderTime,
+        movedUnitIdsRef.current,
+        playerColor,
+      );
+
       rafId = requestAnimationFrame(render);
     }
+
     rafId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(rafId);
   }, [playerColor]);
 
   const myPendingMoves = [...pendingMoves.entries()]
-    .filter(([id]) => hexUnits.find((u) => u.id === id)?.owner === playerColor)
+    .filter(([unitId]) => hexUnits.find((unit) => unit.id === unitId)?.owner === playerColor)
     .map(([unitId, move]) => {
       const unit = hexUnits.find((entry) => entry.id === unitId);
       return {
         unitId,
         move,
-        owner: unit?.owner,
         fromCol: unit?.col,
         fromRow: unit?.row,
       };
     });
+
   const myPendingCount = myPendingMoves.length;
 
   return (
-    <div ref={containerRef} onPointerDown={handlePointerDown} onContextMenu={(e) => e.preventDefault()} className="absolute inset-0 touch-none cursor-default">
+    <div
+      ref={containerRef}
+      onPointerDown={handlePointerDown}
+      onContextMenu={(event) => event.preventDefault()}
+      className="absolute inset-0 touch-none cursor-default"
+    >
       <canvas ref={canvasRef} className="absolute inset-0" />
 
-      {/* Turn HUD */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[70] flex items-end gap-4 pointer-events-auto">
-        {/* Turn counter */}
-        <div className="px-5 py-2.5 rounded-xl border border-white/10 bg-[#0f1722]/90 backdrop-blur-md shadow-2xl">
-          <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400">Turn </span>
+      <div className="absolute bottom-6 left-1/2 z-[70] flex -translate-x-1/2 items-end gap-4 pointer-events-auto">
+        <div className="rounded-xl border border-white/10 bg-[#0f1722]/90 px-5 py-2.5 shadow-2xl backdrop-blur-md">
+          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Turn </span>
           <span className="text-lg font-black text-white">{turnNumber}</span>
         </div>
 
-        {/* Pending moves indicator */}
         {myPendingCount > 0 && (
-          <div className="min-w-[240px] max-w-[420px] px-4 py-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 backdrop-blur-md shadow-2xl">
+          <div className="min-w-[240px] max-w-[420px] rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 shadow-2xl backdrop-blur-md">
             <div className="flex items-center justify-between gap-4">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-cyan-400">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">
                 {myPendingCount} move{myPendingCount > 1 ? "s" : ""} queued
               </span>
               {!playerReady && !isResolving && (
@@ -632,7 +884,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
                     disabled={playerReady || isResolving}
                     className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] transition-colors ${
                       playerReady || isResolving
-                        ? "border-white/5 bg-white/5 text-slate-600 cursor-not-allowed"
+                        ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
                         : "border-rose-500/35 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
                     }`}
                   >
@@ -644,30 +896,29 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
           </div>
         )}
 
-        {/* End Turn button */}
         <button
           id="end-turn-btn"
           onClick={playerReady ? handleCancelReady : handleEndTurn}
           disabled={isResolving || !playerColor || (playerReady && opponentReady)}
-          className={`px-6 py-3 rounded-xl border-2 text-sm font-black uppercase tracking-widest transition-all backdrop-blur-md shadow-2xl flex items-center gap-2 ${
+          className={`flex items-center gap-2 rounded-xl border-2 px-6 py-3 text-sm font-black uppercase tracking-widest shadow-2xl backdrop-blur-md transition-all ${
             playerReady
               ? opponentReady
-                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400 cursor-default"
-                : "border-rose-500/45 bg-rose-500/12 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 hover:border-rose-400/60"
+                ? "cursor-default border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                : "border-rose-500/45 bg-rose-500/12 text-rose-300 hover:border-rose-400/60 hover:bg-rose-500/20 hover:text-rose-200"
               : isResolving || !playerColor
-                ? "border-white/5 bg-white/5 text-slate-600 cursor-not-allowed"
-                : "border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 hover:border-amber-400/60"
+                ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
+                : "border-amber-500/50 bg-amber-500/10 text-amber-400 hover:border-amber-400/60 hover:bg-amber-500/20 hover:text-amber-300"
           }`}
         >
           {playerReady ? (
             opponentReady ? (
               <>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                 Ready
               </>
             ) : (
               <>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                 Cancel Ready
               </>
             )
@@ -678,7 +929,6 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
           )}
         </button>
       </div>
-
     </div>
   );
 }
