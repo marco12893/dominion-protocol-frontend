@@ -254,8 +254,7 @@ function toPendingMoveMap(pendingMoves = {}) {
   );
 }
 
-export default function HexGridWorld({ windowSize, playerColor, socketRef }) {
-  const socket = socketRef?.current ?? null;
+export default function HexGridWorld({ windowSize, playerColor, socket, socketRef }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const cameraRef = useRef({ x: 0, y: 0 });
@@ -509,6 +508,19 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef }) {
     socketRef.current?.emit("hex:endTurn");
   }
 
+  function handleCancelReady() {
+    if (!playerReady || opponentReady || isResolving) return;
+    socketRef.current?.emit("hex:cancelReady");
+  }
+
+  function handleCancelMove(unitId) {
+    if (!unitId || playerReady || isResolving) return;
+    socketRef.current?.emit("hex:cancelMove", { unitId });
+    if (selectedUnitIdRef.current === unitId) {
+      setSelectedUnitId(null);
+    }
+  }
+
   // Clear animation data
   useEffect(() => {
     const iv = setInterval(() => {
@@ -561,14 +573,26 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef }) {
     return () => cancelAnimationFrame(rafId);
   }, [playerColor]);
 
-  const myPendingCount = [...pendingMoves.entries()].filter(([id]) => hexUnits.find((u) => u.id === id)?.owner === playerColor).length;
+  const myPendingMoves = [...pendingMoves.entries()]
+    .filter(([id]) => hexUnits.find((u) => u.id === id)?.owner === playerColor)
+    .map(([unitId, move]) => {
+      const unit = hexUnits.find((entry) => entry.id === unitId);
+      return {
+        unitId,
+        move,
+        owner: unit?.owner,
+        fromCol: unit?.col,
+        fromRow: unit?.row,
+      };
+    });
+  const myPendingCount = myPendingMoves.length;
 
   return (
     <div ref={containerRef} onPointerDown={handlePointerDown} onContextMenu={(e) => e.preventDefault()} className="absolute inset-0 touch-none cursor-default">
       <canvas ref={canvasRef} className="absolute inset-0" />
 
       {/* Turn HUD */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-4 pointer-events-auto">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[70] flex items-end gap-4 pointer-events-auto">
         {/* Turn counter */}
         <div className="px-5 py-2.5 rounded-xl border border-white/10 bg-[#0f1722]/90 backdrop-blur-md shadow-2xl">
           <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400">Turn </span>
@@ -577,28 +601,76 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef }) {
 
         {/* Pending moves indicator */}
         {myPendingCount > 0 && (
-          <div className="px-4 py-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 backdrop-blur-md">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-cyan-400">
-              {myPendingCount} move{myPendingCount > 1 ? "s" : ""} queued
-            </span>
+          <div className="min-w-[240px] max-w-[420px] px-4 py-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 backdrop-blur-md shadow-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-cyan-400">
+                {myPendingCount} move{myPendingCount > 1 ? "s" : ""} queued
+              </span>
+              {!playerReady && !isResolving && (
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                  Cancel individually below
+                </span>
+              )}
+            </div>
+            <div className="mt-3 flex flex-col gap-2">
+              {myPendingMoves.map(({ unitId, move, fromCol, fromRow }) => (
+                <div
+                  key={unitId}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-slate-950/40 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      {unitId}
+                    </div>
+                    <div className="text-xs font-semibold text-slate-200">
+                      ({fromCol}, {fromRow}) to ({move.toCol}, {move.toRow})
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelMove(unitId)}
+                    disabled={playerReady || isResolving}
+                    className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] transition-colors ${
+                      playerReady || isResolving
+                        ? "border-white/5 bg-white/5 text-slate-600 cursor-not-allowed"
+                        : "border-rose-500/35 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
         {/* End Turn button */}
         <button
           id="end-turn-btn"
-          onClick={handleEndTurn}
-          disabled={playerReady || isResolving || !playerColor}
+          onClick={playerReady ? handleCancelReady : handleEndTurn}
+          disabled={isResolving || !playerColor || (playerReady && opponentReady)}
           className={`px-6 py-3 rounded-xl border-2 text-sm font-black uppercase tracking-widest transition-all backdrop-blur-md shadow-2xl flex items-center gap-2 ${
             playerReady
-              ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400 cursor-default"
+              ? opponentReady
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400 cursor-default"
+                : "border-rose-500/45 bg-rose-500/12 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 hover:border-rose-400/60"
               : isResolving || !playerColor
                 ? "border-white/5 bg-white/5 text-slate-600 cursor-not-allowed"
                 : "border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 hover:border-amber-400/60"
           }`}
         >
           {playerReady ? (
-            <><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Ready</>
+            opponentReady ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Ready
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                Cancel Ready
+              </>
+            )
           ) : isResolving ? (
             "Resolving..."
           ) : (

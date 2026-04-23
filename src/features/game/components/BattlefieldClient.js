@@ -69,6 +69,7 @@ export default function BattlefieldClient() {
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [orderMarkers, setOrderMarkers] = useState([]);
   const [playerColor, setPlayerColor] = useState(null);
+  const [socket, setSocket] = useState(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
   const [teamSelections, setTeamSelections] = useState(INITIAL_TEAM_SELECTIONS);
@@ -449,6 +450,7 @@ export default function BattlefieldClient() {
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
+    setSocket(socket);
 
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
@@ -567,6 +569,7 @@ export default function BattlefieldClient() {
     return () => {
       socket.disconnect();
       socketRef.current = null;
+      setSocket(null);
     };
   }, []);
 
@@ -903,7 +906,7 @@ export default function BattlefieldClient() {
         </>
       ) : (
         <>
-          <HexGridWorld windowSize={windowSize} playerColor={playerColor} socketRef={socketRef} />
+          <HexGridWorld windowSize={windowSize} playerColor={playerColor} socket={socket} socketRef={socketRef} />
           {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
         </>
       )}
