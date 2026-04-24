@@ -8,6 +8,8 @@ export default function BattlefieldTopOverlay({
   onToggleFullscreen,
   activeLayer,
   onToggleLayer,
+  layer3Battle,
+  battleClockLabel,
 }) {
   return (
     <>
@@ -17,7 +19,11 @@ export default function BattlefieldTopOverlay({
             Dominion Protocol
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-white drop-shadow-md">
-            {activeLayer === 3 ? "RTS Prototype" : "Strategic Map"}
+            {activeLayer === 3
+              ? layer3Battle?.status === "active"
+                ? "Layer 3 Engagement"
+                : "Layer 3 Standby"
+              : "Strategic Map"}
           </h1>
         </div>
 
@@ -38,6 +44,27 @@ export default function BattlefieldTopOverlay({
             </span>
           </div>
         </div>
+
+        {layer3Battle?.status === "active" && (
+          <div className="rounded-lg border border-amber-400/20 bg-amber-500/10 backdrop-blur-sm p-3 text-xs shadow-xl">
+            <div className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-300/80">
+              Layer 3 Battle
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-4 text-slate-100">
+              <span className="font-semibold">
+                Hex {layer3Battle.hex?.col}, {layer3Battle.hex?.row}
+              </span>
+              <span className="font-mono text-lg font-black text-amber-200">
+                {battleClockLabel}
+              </span>
+            </div>
+            {layer3Battle.queueLength > 0 && (
+              <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.22em] text-amber-100/70">
+                {layer3Battle.queueLength} more engagement{layer3Battle.queueLength > 1 ? "s" : ""} queued
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-3 pointer-events-none">
@@ -156,4 +183,3 @@ export default function BattlefieldTopOverlay({
     </>
   );
 }
-

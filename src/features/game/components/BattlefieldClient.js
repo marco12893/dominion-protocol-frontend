@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
 import BattlefieldStyles from "@/features/game/components/BattlefieldStyles";
@@ -10,8 +10,8 @@ import HexGridWorld from "@/features/game/components/HexGridWorld";
 import ControlGroupsOverlay from "@/features/game/components/ControlGroupsOverlay";
 import BottomHud from "@/features/game/components/hud/BottomHud";
 import ColorChooserModal from "@/features/game/components/modals/ColorChooserModal";
-import UnitSelectionModal from "@/features/game/components/modals/UnitSelectionModal";
 import {
+  INITIAL_LAYER3_BATTLE,
   INITIAL_OBSTACLES,
   INITIAL_TEAM_SELECTIONS,
   INITIAL_UNITS,
@@ -29,6 +29,7 @@ import {
   getUnitsInSelection,
   getVisibleUnitsOfVariant,
   normalizeSelection,
+  normalizeLayer3BattleState,
   normalizeWorldUnit,
   toMapPoint,
 } from "@/features/game/utils/gameHelpers";
@@ -45,8 +46,9 @@ export default function BattlefieldClient() {
   const lastDigitKeyPressRef = useRef({});
   const latestStateRef = useRef({});
   const playerColorRef = useRef(null);
-  const prevTeamSelectionsRef = useRef(INITIAL_TEAM_SELECTIONS);
   const unitsByIdRef = useRef(new Map());
+  const activeBattleIdRef = useRef(null);
+  const centeredBattleIdRef = useRef(null);
 
   // High-frequency refs for rendering loop
   const unitsRef = useRef(INITIAL_UNITS);
@@ -54,7 +56,6 @@ export default function BattlefieldClient() {
   const visualEffectsRef = useRef([]);
   const cameraRef = useRef({ x: 0, y: 0 });
   const selectedUnitIdsRef = useRef([]);
-  const lastUpdateTimestampRef = useRef(Date.now());
 
   // Throttled UI state (updated at lower frequency)
   const [uiTick, setUiTick] = useState(0);
@@ -69,16 +70,18 @@ export default function BattlefieldClient() {
   const [obstacles, setObstacles] = useState(INITIAL_OBSTACLES);
   const [orderMarkers, setOrderMarkers] = useState([]);
   const [playerColor, setPlayerColor] = useState(null);
-  const [socket, setSocket] = useState(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
   const [teamSelections, setTeamSelections] = useState(INITIAL_TEAM_SELECTIONS);
+  const [layer3Battle, setLayer3Battle] = useState(INITIAL_LAYER3_BATTLE);
   const [units, setUnits] = useState(INITIAL_UNITS);
   const [visualEffects, setVisualEffects] = useState([]);
   const [visualProjectiles, setVisualProjectiles] = useState([]);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeLayer, setActiveLayer] = useState(3);
+  const [activeLayer, setActiveLayer] = useState(2);
+  const [worldTick, setWorldTick] = useState(0);
+  const [lastUpdateTimestamp, setLastUpdateTimestamp] = useState(0);
 
   const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
@@ -132,7 +135,7 @@ export default function BattlefieldClient() {
     playerColorRef.current = playerColor;
   }, [playerColor]);
 
-  function addNotification(message, type = "info") {
+  const addNotification = useCallback((message, type = "info") => {
     const id = Math.random().toString(36).slice(2, 11);
 
     setNotifications((current) =>
@@ -142,7 +145,60 @@ export default function BattlefieldClient() {
     window.setTimeout(() => {
       setNotifications((current) => current.filter((entry) => entry.id !== id));
     }, 5000);
-  }
+  }, []);
+
+  const handleLayer3BattleUpdate = useCallback((nextLayer3Battle, nextUnits = unitsRef.current) => {
+    const previousBattleId = activeBattleIdRef.current;
+    const nextBattleId = nextLayer3Battle?.battleId ?? null;
+
+    if (previousBattleId !== nextBattleId) {
+      setSelectedUnitIds([]);
+      selectedUnitIdsRef.current = [];
+      setControlGroups({});
+      setOrderMarkers([]);
+      setIsAttackMoveMode(false);
+      setHoveredUnitId(null);
+      setSelectionBox(null);
+      setVisualProjectiles([]);
+      visualProjectilesRef.current = [];
+      setVisualEffects([]);
+      visualEffectsRef.current = [];
+
+      if (nextBattleId) {
+        const battleHexLabel = nextLayer3Battle?.hex
+          ? `HEX ${nextLayer3Battle.hex.col},${nextLayer3Battle.hex.row}`
+          : "CONTESTED HEX";
+        addNotification(`LAYER 3 ENGAGEMENT | ${battleHexLabel}`, "info");
+        setActiveLayer(3);
+        centeredBattleIdRef.current = null;
+      } else if (previousBattleId) {
+        addNotification("LAYER 3 ENGAGEMENT RESOLVED", "info");
+        centeredBattleIdRef.current = null;
+      }
+
+      activeBattleIdRef.current = nextBattleId;
+    }
+
+    if (
+      !nextBattleId ||
+      centeredBattleIdRef.current === nextBattleId ||
+      !playerColorRef.current
+    ) {
+      return;
+    }
+
+    const viewport = latestStateRef.current.windowSize;
+    if (!viewport?.width || !viewport?.height || !Array.isArray(nextUnits) || nextUnits.length === 0) {
+      return;
+    }
+
+    const ownUnits = nextUnits.filter(
+      (unit) => unit.owner === playerColorRef.current && unit.health > 0,
+    );
+    const focusUnits = ownUnits.length > 0 ? ownUnits : nextUnits;
+    setCamera(centerCameraOnUnits(focusUnits, viewport));
+    centeredBattleIdRef.current = nextBattleId;
+  }, [addNotification]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -175,7 +231,7 @@ export default function BattlefieldClient() {
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
 
-  function toggleFullscreen() {
+  const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch((err) => {
         addNotification(`Error enabling fullscreen: ${err.message}`, "red");
@@ -183,7 +239,7 @@ export default function BattlefieldClient() {
     } else {
       document.exitFullscreen();
     }
-  }
+  }, [addNotification]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -295,7 +351,7 @@ export default function BattlefieldClient() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [toggleFullscreen]);
 
   useEffect(() => {
     function handleMouseMove(event) {
@@ -450,7 +506,6 @@ export default function BattlefieldClient() {
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
-    setSocket(socket);
 
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
@@ -463,11 +518,20 @@ export default function BattlefieldClient() {
       unitsRef.current = INITIAL_UNITS;
       setObstacles(INITIAL_OBSTACLES);
       setTeamSelections(INITIAL_TEAM_SELECTIONS);
+      setLayer3Battle(INITIAL_LAYER3_BATTLE);
+      setNotifications([]);
+      setHoveredTooltip(null);
+      setHoveredUnitId(null);
+      setOrderMarkers([]);
+      setSelectionBox(null);
       setVisualProjectiles([]);
       visualProjectilesRef.current = [];
       setVisualEffects([]);
       visualEffectsRef.current = [];
-      prevTeamSelectionsRef.current = INITIAL_TEAM_SELECTIONS;
+      activeBattleIdRef.current = null;
+      centeredBattleIdRef.current = null;
+      setActiveLayer(2);
+      setWorldTick(0);
     });
     socket.on("unit:attack", (data) => {
       if (data.variantId === "lightTank" || data.variantId === "heavyTank") {
@@ -506,53 +570,53 @@ export default function BattlefieldClient() {
       if (!nextTeamSelections) {
         return;
       }
-
-      const activePlayerColor = playerColorRef.current;
-
-      if (activePlayerColor) {
-        const activeOpponentColor = activePlayerColor === "blue" ? "red" : "blue";
-        const previousOpponent = prevTeamSelectionsRef.current?.[activeOpponentColor];
-        const nextOpponent = nextTeamSelections[activeOpponentColor];
-
-        if (nextOpponent?.hasDeployed && !previousOpponent?.hasDeployed) {
-          addNotification(
-            `${activeOpponentColor.toUpperCase()} BATTALION DEPLOYED`,
-            activeOpponentColor,
-          );
-        }
-      }
-
-      prevTeamSelectionsRef.current = nextTeamSelections;
       setTeamSelections(nextTeamSelections);
     }
 
     socket.on("world:snapshot", (snapshot) => {
       applyTeamSelections(snapshot?.teamSelections);
+      const nextLayer3Battle = normalizeLayer3BattleState(snapshot?.layer3Battle);
+      setLayer3Battle(nextLayer3Battle);
+      if (typeof snapshot?.tick === "number") {
+        setWorldTick(snapshot.tick);
+      }
 
       if (Array.isArray(snapshot?.obstacles)) {
         setObstacles(snapshot.obstacles);
       }
       if (Array.isArray(snapshot?.units)) {
         const timestamp = Date.now();
-        lastUpdateTimestampRef.current = timestamp;
+        setLastUpdateTimestamp(timestamp);
         const normalizedUnits = snapshot.units.map((unit) => ({
           ...normalizeWorldUnit(unit),
           _timestamp: timestamp,
         }));
         setUnits(normalizedUnits);
         unitsRef.current = normalizedUnits;
+        handleLayer3BattleUpdate(nextLayer3Battle, normalizedUnits);
+      } else {
+        handleLayer3BattleUpdate(nextLayer3Battle, []);
       }
     });
 
     socket.on("world:delta", (delta) => {
       applyTeamSelections(delta?.teamSelections);
+      const nextLayer3Battle = delta?.layer3Battle
+        ? normalizeLayer3BattleState(delta.layer3Battle)
+        : null;
+      if (delta?.layer3Battle) {
+        setLayer3Battle(nextLayer3Battle);
+      }
+      if (typeof delta?.tick === "number") {
+        setWorldTick(delta.tick);
+      }
 
       if (Array.isArray(delta?.obstacles)) {
         setObstacles(delta.obstacles);
       }
       if (Array.isArray(delta?.units) || Array.isArray(delta?.removedUnitIds)) {
         const timestamp = Date.now();
-        lastUpdateTimestampRef.current = timestamp;
+        setLastUpdateTimestamp(timestamp);
         setUnits((currentUnits) => {
           const nextUnits = applyWorldDelta(currentUnits, delta);
           // Attach timestamp to updated units
@@ -561,17 +625,21 @@ export default function BattlefieldClient() {
             return wasUpdated ? { ...unit, _timestamp: timestamp } : unit;
           });
           unitsRef.current = updatedUnits;
+          if (nextLayer3Battle) {
+            handleLayer3BattleUpdate(nextLayer3Battle, updatedUnits);
+          }
           return updatedUnits;
         });
+      } else if (nextLayer3Battle) {
+        handleLayer3BattleUpdate(nextLayer3Battle, unitsRef.current);
       }
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
-      setSocket(null);
     };
-  }, []);
+  }, [handleLayer3BattleUpdate]);
 
   useEffect(() => {
     if (!selectionBox) {
@@ -634,6 +702,10 @@ export default function BattlefieldClient() {
   function handleMapRightClick(event) {
     event.preventDefault();
 
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     if (isAttackMoveMode) {
       setIsAttackMoveMode(false);
     }
@@ -690,6 +762,10 @@ export default function BattlefieldClient() {
   }
 
   function handleMapPointerDown(event) {
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     if (event.button !== 0) {
       return;
     }
@@ -744,6 +820,10 @@ export default function BattlefieldClient() {
   }
 
   function handleMapDoubleClick(event) {
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     const point = toMapPoint(event.clientX, event.clientY, camera);
     const clickedUnit = units.find(
       (unit) =>
@@ -769,6 +849,10 @@ export default function BattlefieldClient() {
   }
 
   function handleIssueMinimapMove(point) {
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     if (isAttackMoveMode) {
       setIsAttackMoveMode(false);
     }
@@ -780,6 +864,10 @@ export default function BattlefieldClient() {
   }
 
   function handleStop(event) {
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     setIsAttackMoveMode(false);
     if (selectedUnitIds.length > 0) {
       socketRef.current?.emit("unit:stop", {
@@ -790,6 +878,10 @@ export default function BattlefieldClient() {
   }
 
   function handleHoldPosition(event) {
+    if (layer3Battle.status !== "active") {
+      return;
+    }
+
     setIsAttackMoveMode(false);
     if (selectedUnitIds.length > 0) {
       socketRef.current?.emit("unit:holdPosition", {
@@ -809,6 +901,16 @@ export default function BattlefieldClient() {
     !!playerColor &&
     !!teamSelections[opponentColor]?.socketId &&
     !teamSelections[opponentColor]?.isOnline;
+  const remainingBattleSeconds =
+    layer3Battle.status === "active" && layer3Battle.endsAtTick !== null
+      ? Math.max(0, Math.ceil((layer3Battle.endsAtTick - worldTick) / 60))
+      : 0;
+  const battleClockLabel =
+    layer3Battle.status === "active"
+      ? `${String(Math.floor(remainingBattleSeconds / 60)).padStart(2, "0")}:${String(
+        remainingBattleSeconds % 60,
+      ).padStart(2, "0")}`
+      : "--:--";
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-slate-950 font-sans text-slate-100 select-none">
@@ -822,6 +924,8 @@ export default function BattlefieldClient() {
         onToggleFullscreen={toggleFullscreen}
         activeLayer={activeLayer}
         onToggleLayer={() => setActiveLayer((l) => (l === 3 ? 2 : 3))}
+        layer3Battle={layer3Battle}
+        battleClockLabel={battleClockLabel}
       />
 
       {activeLayer === 3 ? (
@@ -842,7 +946,7 @@ export default function BattlefieldClient() {
             selectionBounds={selectionBounds}
             units={units}
             unitsRef={unitsRef}
-            lastUpdateTimestamp={lastUpdateTimestampRef.current}
+            lastUpdateTimestamp={lastUpdateTimestamp}
             visualEffects={visualEffects}
             visualEffectsRef={visualEffectsRef}
             visualProjectiles={visualProjectiles}
@@ -850,52 +954,47 @@ export default function BattlefieldClient() {
             windowSize={windowSize}
           />
 
-          <ControlGroupsOverlay
-            controlGroups={controlGroups}
-            onCenterGroup={(groupUnits, viewport) =>
-              setCamera(centerCameraOnUnits(groupUnits, viewport))
-            }
-            onSelectGroup={setSelectedUnitIds}
-            playerColor={playerColor}
-            selectedUnitIds={selectedUnitIds}
-            units={units}
-            windowSize={windowSize}
-          />
-
-          <BottomHud
-            allSelectedHoldingPosition={allSelectedHoldingPosition}
-            camera={camera}
-            hoveredTooltip={hoveredTooltip}
-            isAttackMoveMode={isAttackMoveMode}
-            obstacles={obstacles}
-            onActivateAttackMove={() => {
-              if (selectedUnitIds.length > 0) {
-                setIsAttackMoveMode(true);
+          {layer3Battle.status === "active" && (
+            <ControlGroupsOverlay
+              controlGroups={controlGroups}
+              onCenterGroup={(groupUnits, viewport) =>
+                setCamera(centerCameraOnUnits(groupUnits, viewport))
               }
-            }}
-            onHoldPosition={handleHoldPosition}
-            onHoverTooltipChange={setHoveredTooltip}
-            onIssueMinimapMove={handleIssueMinimapMove}
-            onNavigateMinimap={handleNavigateMinimap}
-            onSelectSingleUnit={(unitId) => setSelectedUnitIds([unitId])}
-            onStop={handleStop}
-            selectedUnit={selectedUnit}
-            selectedUnitDisplay={selectedUnitDisplay}
-            selectedUnitIds={selectedUnitIds}
-            units={units}
-            windowSize={windowSize}
-          />
-
-          {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
-
-          {playerColor && !teamSelections[playerColor]?.hasDeployed && (
-            <UnitSelectionModal
+              onSelectGroup={setSelectedUnitIds}
               playerColor={playerColor}
-              onDeploy={(manifest) => {
-                socketRef.current?.emit("player:deploy", manifest);
-              }}
+              selectedUnitIds={selectedUnitIds}
+              units={units}
+              windowSize={windowSize}
             />
           )}
+
+          {layer3Battle.status === "active" && (
+            <BottomHud
+              allSelectedHoldingPosition={allSelectedHoldingPosition}
+              camera={camera}
+              hoveredTooltip={hoveredTooltip}
+              isAttackMoveMode={isAttackMoveMode}
+              obstacles={obstacles}
+              onActivateAttackMove={() => {
+                if (selectedUnitIds.length > 0) {
+                  setIsAttackMoveMode(true);
+                }
+              }}
+              onHoldPosition={handleHoldPosition}
+              onHoverTooltipChange={setHoveredTooltip}
+              onIssueMinimapMove={handleIssueMinimapMove}
+              onNavigateMinimap={handleNavigateMinimap}
+              onSelectSingleUnit={(unitId) => setSelectedUnitIds([unitId])}
+              onStop={handleStop}
+              selectedUnit={selectedUnit}
+              selectedUnitDisplay={selectedUnitDisplay}
+              selectedUnitIds={selectedUnitIds}
+              units={units}
+              windowSize={windowSize}
+            />
+          )}
+
+          {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
 
           {opponentDisconnected && (
             <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur-md text-rose-400 text-sm font-bold flex items-center gap-3 animate-bounce">
@@ -903,10 +1002,33 @@ export default function BattlefieldClient() {
               OPPONENT COMMANDER DISCONNECTED
             </div>
           )}
+
+          {layer3Battle.status !== "active" && (
+            <div className="fixed inset-0 z-[95] flex items-center justify-center pointer-events-none">
+              <div className="mx-6 max-w-xl rounded-[28px] border border-white/10 bg-[#09111acc]/92 px-8 py-7 text-center shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+                <div className="text-[10px] font-black uppercase tracking-[0.34em] text-cyan-300/70">
+                  Layer 3 Standby
+                </div>
+                <div className="mt-3 text-2xl font-black text-white">
+                  No active hex engagement
+                </div>
+                <div className="mt-3 text-sm text-slate-300/80">
+                  Move a blue army and a red army into the same hex on Layer 2 to start a
+                  three-minute battle here. Surviving units will be written back to the
+                  strategic map when the fight ends.
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>
-          <HexGridWorld windowSize={windowSize} playerColor={playerColor} socket={socket} socketRef={socketRef} />
+          <HexGridWorld
+            windowSize={windowSize}
+            playerColor={playerColor}
+            socketRef={socketRef}
+            isSocketReady={isConnected}
+          />
           {!playerColor && <ColorChooserModal onJoin={handleJoinTeam} teamSelections={teamSelections} />}
         </>
       )}

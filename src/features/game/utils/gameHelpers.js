@@ -1,5 +1,6 @@
 import {
   FALLBACK_UNIT_DISPLAY,
+  INITIAL_LAYER3_BATTLE,
   MAP_HEIGHT,
   MAP_WIDTH,
   UNIT_DISPLAY_INFO,
@@ -196,6 +197,34 @@ export function normalizeWorldUnitPatch(unitPatch) {
   }
 
   return patch;
+}
+
+export function normalizeLayer3BattleState(layer3Battle) {
+  const normalizedBattle = {
+    ...INITIAL_LAYER3_BATTLE,
+    ...(layer3Battle ?? {}),
+  };
+
+  normalizedBattle.status = normalizedBattle.status === "active" ? "active" : "idle";
+  normalizedBattle.battleId =
+    typeof normalizedBattle.battleId === "string" ? normalizedBattle.battleId : null;
+  normalizedBattle.queueLength = Math.max(
+    0,
+    Math.floor(Number(normalizedBattle.queueLength) || 0),
+  );
+  normalizedBattle.startedAtTick = Number.isFinite(Number(normalizedBattle.startedAtTick))
+    ? Number(normalizedBattle.startedAtTick)
+    : null;
+  normalizedBattle.endsAtTick = Number.isFinite(Number(normalizedBattle.endsAtTick))
+    ? Number(normalizedBattle.endsAtTick)
+    : null;
+  normalizedBattle.hex =
+    typeof normalizedBattle.hex?.col === "number" &&
+    typeof normalizedBattle.hex?.row === "number"
+      ? { col: normalizedBattle.hex.col, row: normalizedBattle.hex.row }
+      : null;
+
+  return normalizedBattle;
 }
 
 export function applyWorldDelta(currentUnits, delta) {

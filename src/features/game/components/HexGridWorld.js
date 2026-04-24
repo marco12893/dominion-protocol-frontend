@@ -30,6 +30,15 @@ import {
   normalizeResourceCounts,
   normalizeResourceLedger,
 } from "@/features/game/constants/hexEconomy";
+import {
+  DEFAULT_ARMY_RULES,
+  getArmyShortLabel,
+  getArmySubtitle,
+  getArmyTitle,
+  normalizeArmyRules,
+  normalizeHexArmies,
+} from "@/features/game/utils/hexArmy";
+import { normalizeLayer3BattleState } from "@/features/game/utils/gameHelpers";
 
 const HEX_SIZE = 32;
 const GRID_COLS = 40;
@@ -111,12 +120,12 @@ const DEFAULT_CITIES = [
 ];
 
 const INITIAL_HEX_UNITS = [
-  { id: "hex-u1", col: 5, row: 4, owner: "blue", variantId: "rifleman" },
-  { id: "hex-u2", col: 8, row: 8, owner: "blue", variantId: "antiTank" },
-  { id: "hex-u3", col: 10, row: 6, owner: "blue", variantId: "lightTank" },
-  { id: "hex-u4", col: 32, row: 21, owner: "red", variantId: "rifleman" },
-  { id: "hex-u5", col: 35, row: 23, owner: "red", variantId: "antiTank" },
-  { id: "hex-u6", col: 30, row: 24, owner: "red", variantId: "lightTank" },
+  { id: "hex-u1", col: 5, row: 4, owner: "blue", slots: [{ variantId: "rifleman", count: 18 }] },
+  { id: "hex-u2", col: 8, row: 8, owner: "blue", slots: [{ variantId: "antiTank", count: 8 }] },
+  { id: "hex-u3", col: 10, row: 6, owner: "blue", slots: [{ variantId: "lightTank", count: 5 }] },
+  { id: "hex-u4", col: 32, row: 21, owner: "red", slots: [{ variantId: "rifleman", count: 18 }] },
+  { id: "hex-u5", col: 35, row: 23, owner: "red", slots: [{ variantId: "antiTank", count: 8 }] },
+  { id: "hex-u6", col: 30, row: 24, owner: "red", slots: [{ variantId: "lightTank", count: 5 }] },
 ];
 
 function getTerrainIndex(col, row) {
@@ -520,6 +529,14 @@ function drawPendingMoves(ctx, camera, pendingMoves, units, renderTime) {
 }
 
 function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds, playerColor) {
+  const unitsByHex = new Map();
+  for (const unit of units) {
+    const key = getHexKey(unit.col, unit.row);
+    const occupants = unitsByHex.get(key) ?? [];
+    occupants.push(unit);
+    unitsByHex.set(key, occupants);
+  }
+
   for (const unit of units) {
     const { x: wx, y: wy } = hexToPixel(unit.col, unit.row, HEX_SIZE);
     let sx;
@@ -534,6 +551,13 @@ function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds,
     } else {
       sx = wx - camera.x;
       sy = wy - camera.y;
+    }
+
+    const occupants = unitsByHex.get(getHexKey(unit.col, unit.row)) ?? [unit];
+    const stackIndex = occupants.findIndex((entry) => entry.id === unit.id);
+    if (occupants.length > 1 && stackIndex >= 0) {
+      sx += (stackIndex - (occupants.length - 1) / 2) * 14;
+      sy += stackIndex % 2 === 0 ? -6 : 6;
     }
 
     const isSelected = unit.id === selectedUnitId;
@@ -579,12 +603,29 @@ function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds,
     ctx.arc(sx, sy, COLORS.unitDotRadius + 2, 0, Math.PI * 2);
     ctx.stroke();
 
-    const unitLabel = UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel ?? FALLBACK_UNIT_DISPLAY.shortLabel;
+    const unitLabel = getArmyShortLabel(unit);
     ctx.fillStyle = "rgba(241, 245, 249, 0.95)";
     ctx.font = unitLabel.length > 1 ? "700 7px ui-sans-serif" : "700 8px ui-sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(unitLabel, sx, sy + 0.5);
+    ctx.fillText(unitLabel, sx, sy - 0.5);
+
+    if ((unit.usedSlots ?? 0) > 1) {
+      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.beginPath();
+      ctx.arc(sx + 8, sy - 8, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.font = "700 6px ui-sans-serif";
+      ctx.fillText(String(unit.usedSlots), sx + 8, sy - 7.5);
+    }
+
+    if ((unit.totalUnits ?? 0) > 0) {
+      ctx.fillStyle = "rgba(226, 232, 240, 0.88)";
+      ctx.font = "700 6px ui-sans-serif";
+      ctx.fillText(String(unit.totalUnits), sx, sy + 9.5);
+    }
 
     if (hasMoved && isOwned) {
       ctx.globalAlpha = 1;
@@ -603,7 +644,7 @@ function toPendingMoveMap(pendingMoves = {}) {
   );
 }
 
-export default function HexGridWorld({ windowSize, playerColor, socket, socketRef }) {
+export default function HexGridWorld({ windowSize, playerColor, socketRef, isSocketReady }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const cameraRef = useRef({ x: 0, y: 0 });
@@ -611,7 +652,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const mousePosRef = useRef({ x: 0, y: 0 });
   const terrainImagesRef = useRef(new Map());
 
-  const [hexUnits, setHexUnits] = useState(INITIAL_HEX_UNITS);
+  const [hexUnits, setHexUnits] = useState(() => normalizeHexArmies(INITIAL_HEX_UNITS, DEFAULT_ARMY_RULES));
   const [cities, setCities] = useState(DEFAULT_CITIES);
   const [terrainGrid, setTerrainGrid] = useState(() => createEmptyTerrainGrid());
   const [selectedUnitId, setSelectedUnitId] = useState(null);
@@ -623,6 +664,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  const [layer3Battle, setLayer3Battle] = useState(() => normalizeLayer3BattleState());
   const [isBuildModalOpen, setIsBuildModalOpen] = useState(false);
   const [buildError, setBuildError] = useState("");
   const [resourceStockpiles, setResourceStockpiles] = useState(
@@ -632,6 +674,8 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     normalizeResourceLedger({}, PLAYER_COLORS),
   );
   const [unitProductionCatalog, setUnitProductionCatalog] = useState({});
+  const [armyRules, setArmyRules] = useState(DEFAULT_ARMY_RULES);
+  const isLayer3BattleActive = layer3Battle.status === "active";
 
   const hexUnitsRef = useRef(hexUnits);
   useEffect(() => {
@@ -680,11 +724,14 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   }, []);
 
   useEffect(() => {
-    if (!socket) {
+    const socket = socketRef.current;
+    if (!isSocketReady || !socket) {
       return undefined;
     }
 
     function applyState(snapshot) {
+      const nextArmyRules = normalizeArmyRules(snapshot?.armyRules);
+
       if (Array.isArray(snapshot?.terrainTiles)) {
         setTerrainGrid(buildTerrainGrid(snapshot.terrainTiles));
       }
@@ -694,10 +741,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       }
 
       if (Array.isArray(snapshot?.hexUnits)) {
-        setHexUnits(snapshot.hexUnits.map((unit) => ({
-          ...unit,
-          variantId: unit.variantId ?? "rifleman",
-        })));
+        setHexUnits(normalizeHexArmies(snapshot.hexUnits, nextArmyRules));
       }
 
       if (typeof snapshot?.turnNumber === "number") {
@@ -711,7 +755,9 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         normalizeResourceLedger(snapshot?.resourceIncome, PLAYER_COLORS),
       );
       setUnitProductionCatalog(snapshot?.unitProductionCatalog ?? {});
+      setArmyRules(nextArmyRules);
       setBuildError("");
+      setLayer3Battle(normalizeLayer3BattleState(snapshot?.layer3Battle));
 
       const readyPlayers = Array.isArray(snapshot?.readyPlayers) ? snapshot.readyPlayers : [];
       setPlayerReady(Boolean(playerColor) && readyPlayers.includes(playerColor));
@@ -777,6 +823,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       setOpponentReady(false);
       setBuildError("");
       setIsBuildModalOpen(false);
+      setLayer3Battle(normalizeLayer3BattleState(resolved?.layer3Battle));
 
       const appliedMoves = Array.isArray(resolved?.appliedMoves) ? resolved.appliedMoves : [];
       const animationStart = performance.now();
@@ -799,11 +846,8 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       window.setTimeout(() => {
         setHexUnits(
           Array.isArray(resolved?.hexUnits)
-            ? resolved.hexUnits.map((unit) => ({
-              ...unit,
-              variantId: unit.variantId ?? "rifleman",
-            }))
-            : INITIAL_HEX_UNITS,
+            ? normalizeHexArmies(resolved.hexUnits, armyRules)
+            : normalizeHexArmies(INITIAL_HEX_UNITS, armyRules),
         );
         setTurnNumber(typeof resolved?.turnNumber === "number" ? resolved.turnNumber : 1);
         setResourceStockpiles(
@@ -812,6 +856,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         setResourceIncome(
           normalizeResourceLedger(resolved?.resourceIncome, PLAYER_COLORS),
         );
+        setLayer3Battle(normalizeLayer3BattleState(resolved?.layer3Battle));
         setIsResolving(false);
       }, TURN_RESOLVE_ANIMATION_MS);
     }
@@ -839,7 +884,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       socket.off("hex:playerUnready", handlePlayerUnready);
       socket.off("hex:turnResolved", handleTurnResolved);
     };
-  }, [playerColor, socket]);
+  }, [armyRules, isSocketReady, playerColor, socketRef]);
 
   const selectedUnit = useMemo(
     () => hexUnits.find((unit) => unit.id === selectedUnitId) || null,
@@ -849,6 +894,17 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const selectedCity = useMemo(
     () => cities.find((city) => city.id === selectedCityId) || null,
     [cities, selectedCityId],
+  );
+
+  const selectedCityArmies = useMemo(
+    () => (
+      selectedCity
+        ? hexUnits.filter(
+          (unit) => unit.col === selectedCity.centerCol && unit.row === selectedCity.centerRow,
+        )
+        : []
+    ),
+    [hexUnits, selectedCity],
   );
 
   const cityHexMap = useMemo(() => {
@@ -877,6 +933,32 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     [playerColor, selectedCity],
   );
 
+  const selectedOwnedCityArmy = useMemo(
+    () => (
+      selectedOwnedCity
+        ? selectedCityArmies.find((army) => army.owner === playerColor) ?? null
+        : null
+    ),
+    [playerColor, selectedCityArmies, selectedOwnedCity],
+  );
+
+  const selectedCityArmy = useMemo(
+    () => (
+      selectedOwnedCityArmy ??
+      selectedCityArmies[0] ??
+      null
+    ),
+    [selectedCityArmies, selectedOwnedCityArmy],
+  );
+
+  const selectedOwnedCityBlocked = useMemo(
+    () => Boolean(
+      selectedOwnedCity &&
+      selectedCityArmies.some((army) => army.owner !== playerColor),
+    ),
+    [playerColor, selectedCityArmies, selectedOwnedCity],
+  );
+
   const selectedCityIncome = useMemo(
     () => (
       selectedOwnedCity
@@ -895,16 +977,64 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     () => normalizeResourceCounts(resourceIncome[playerColor]),
     [playerColor, resourceIncome],
   );
+  function trySubmitMove(unitId, col, row) {
+    if (!unitId || !moveHexSetRef.current.has(getHexKey(col, row))) {
+      return false;
+    }
+
+    const selectedArmy = hexUnitsRef.current.find((unit) => unit.id === unitId);
+    if (!selectedArmy) {
+      return false;
+    }
+
+    const friendlyOccupied = hexUnitsRef.current.some(
+      (unit) =>
+        unit.id !== unitId &&
+        unit.owner === selectedArmy.owner &&
+        unit.col === col &&
+        unit.row === row,
+    );
+
+    if (friendlyOccupied) {
+      return false;
+    }
+
+    const pendingFriendlyOccupied = [...pendingMovesRef.current.entries()].some(
+      ([pendingUnitId, move]) =>
+        pendingUnitId !== unitId &&
+        move.toCol === col &&
+        move.toRow === row,
+    );
+
+    if (pendingFriendlyOccupied) {
+      return false;
+    }
+
+    socketRef.current?.emit("hex:submitMove", {
+      unitId,
+      toCol: col,
+      toRow: row,
+    });
+    setSelectedUnitId(null);
+    setSelectedCityId(null);
+    setIsBuildModalOpen(false);
+    return true;
+  }
 
   const moveHexes = useMemo(
     () => {
-      if (!selectedUnit || selectedUnit.owner !== playerColor || movedUnitIds.has(selectedUnit.id)) {
+      if (
+        !selectedUnit ||
+        selectedUnit.owner !== playerColor ||
+        movedUnitIds.has(selectedUnit.id) ||
+        layer3Battle.status === "active"
+      ) {
         return [];
       }
 
       const blockedHexKeys = new Set(
         hexUnits
-          .filter((unit) => unit.id !== selectedUnit.id)
+          .filter((unit) => unit.id !== selectedUnit.id && unit.owner === selectedUnit.owner)
           .map((unit) => getHexKey(unit.col, unit.row)),
       );
 
@@ -929,15 +1059,11 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
           }
 
           const key = getHexKey(col, row);
-          if (cityCenterSet.has(key)) {
-            return false;
-          }
-
           return !blockedHexKeys.has(key);
         },
       );
     },
-    [cityCenterSet, hexUnits, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
+    [hexUnits, layer3Battle.status, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
   );
 
   const moveHexSet = useMemo(
@@ -1062,7 +1188,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   }, [clampCam]);
 
   function handlePointerDown(event) {
-    if (event.button !== 0 || isResolving || !playerColor || playerReady) {
+    if (event.button !== 0 || isResolving || isLayer3BattleActive || !playerColor || playerReady) {
       return;
     }
 
@@ -1071,15 +1197,28 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     const clickedCity = cities.find(
       (city) => city.centerCol === clickedHex.col && city.centerRow === clickedHex.row,
     );
-    const clickedUnit = hexUnitsRef.current.find(
+    const clickedUnits = hexUnitsRef.current.filter(
       (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
     );
+    const clickedFriendlyUnit = clickedUnits.find((unit) => unit.owner === playerColor) ?? null;
+    const clickedUnit = clickedFriendlyUnit ?? clickedUnits[0] ?? null;
     const currentSelection = selectedUnitIdRef.current;
 
+    if (currentSelection && trySubmitMove(currentSelection, clickedHex.col, clickedHex.row)) {
+      return;
+    }
+
     if (clickedCity) {
-      setSelectedUnitId(null);
       setSelectedCityId(clickedCity.id);
       setBuildError("");
+      setIsBuildModalOpen(false);
+
+      if (clickedFriendlyUnit?.owner === playerColor) {
+        setSelectedUnitId(clickedFriendlyUnit.id);
+      } else {
+        setSelectedUnitId(null);
+      }
+
       return;
     }
 
@@ -1096,38 +1235,13 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       return;
     }
 
-    if (currentSelection && moveHexSetRef.current.has(getHexKey(clickedHex.col, clickedHex.row))) {
-      const occupied = hexUnitsRef.current.some(
-        (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
-      );
-
-      let pendingOccupied = false;
-      for (const [, move] of pendingMovesRef.current) {
-        if (move.toCol === clickedHex.col && move.toRow === clickedHex.row) {
-          pendingOccupied = true;
-          break;
-        }
-      }
-
-      if (!occupied && !pendingOccupied) {
-        socketRef.current?.emit("hex:submitMove", {
-          unitId: currentSelection,
-          toCol: clickedHex.col,
-          toRow: clickedHex.row,
-        });
-        setSelectedUnitId(null);
-        setSelectedCityId(null);
-        return;
-      }
-    }
-
     setSelectedUnitId(null);
     setSelectedCityId(null);
     setIsBuildModalOpen(false);
   }
 
   function handleEndTurn() {
-    if (playerReady || isResolving) {
+    if (playerReady || isResolving || isLayer3BattleActive) {
       return;
     }
 
@@ -1135,7 +1249,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   }
 
   function handleCancelReady() {
-    if (!playerReady || opponentReady || isResolving) {
+    if (!playerReady || opponentReady || isResolving || isLayer3BattleActive) {
       return;
     }
 
@@ -1143,7 +1257,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   }
 
   function handleCancelMove(unitId) {
-    if (!unitId || playerReady || isResolving) {
+    if (!unitId || playerReady || isResolving || isLayer3BattleActive) {
       return;
     }
 
@@ -1155,7 +1269,13 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   }
 
   function handleOpenBuildModal() {
-    if (!selectedOwnedCity || playerReady || isResolving) {
+    if (
+      !selectedOwnedCity ||
+      selectedOwnedCityBlocked ||
+      playerReady ||
+      isResolving ||
+      isLayer3BattleActive
+    ) {
       return;
     }
 
@@ -1168,8 +1288,16 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     setIsBuildModalOpen(false);
   }
 
-  function handleBuildUnit(variantId) {
-    if (!selectedOwnedCity || !variantId || playerReady || isResolving) {
+  function handleBuildUnit(variantId, quantity) {
+    const normalizedQuantity = Math.max(0, Math.floor(Number(quantity) || 0));
+    if (
+      !selectedOwnedCity ||
+      !variantId ||
+      normalizedQuantity <= 0 ||
+      playerReady ||
+      isResolving ||
+      isLayer3BattleActive
+    ) {
       return;
     }
 
@@ -1177,6 +1305,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     socketRef.current?.emit("hex:buildUnit", {
       cityId: selectedOwnedCity.id,
       variantId,
+      quantity: normalizedQuantity,
     });
   }
 
@@ -1273,10 +1402,9 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     .filter(([unitId]) => hexUnits.find((unit) => unit.id === unitId)?.owner === playerColor)
     .map(([unitId, move]) => {
       const unit = hexUnits.find((entry) => entry.id === unitId);
-      const unitDisplay = UNIT_DISPLAY_INFO[unit?.variantId] ?? FALLBACK_UNIT_DISPLAY;
       return {
         unitId,
-        unitLabel: unitDisplay.name,
+        unitLabel: unit ? getArmyTitle(unit) : "Army",
         move,
         fromCol: unit?.col,
         fromRow: unit?.row,
@@ -1334,6 +1462,21 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         </div>
       )}
 
+      {isLayer3BattleActive && (
+        <div
+          className="absolute left-1/2 top-[104px] z-[82] w-[min(720px,calc(100%-1.5rem))] -translate-x-1/2 rounded-[22px] border border-amber-300/20 bg-[linear-gradient(145deg,rgba(78,48,17,0.92),rgba(36,23,9,0.95))] px-4 py-3 text-amber-50 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-200/75">
+            Layer 2 Paused
+          </div>
+          <div className="mt-1 text-sm font-semibold">
+            Layer 3 battle active at hex {layer3Battle.hex?.col}, {layer3Battle.hex?.row}.
+            Strategic moves and city production are locked until the engagement ends.
+          </div>
+        </div>
+      )}
+
       {selectedOwnedCity && (
         <div
           className="absolute bottom-28 left-1/2 z-[85] w-[min(680px,calc(100%-1.5rem))] -translate-x-1/2 pointer-events-auto"
@@ -1346,6 +1489,15 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
               </div>
               <div className="mt-1 text-xl font-black text-white">
                 {selectedOwnedCity.name ?? selectedOwnedCity.id}
+              </div>
+              <div className="mt-2 text-sm text-slate-300/80">
+                {isLayer3BattleActive
+                  ? "Layer 2 actions are paused while the Layer 3 battle resolves."
+                  : selectedOwnedCityBlocked
+                  ? "City center occupied by hostile forces"
+                  : selectedOwnedCityArmy
+                    ? `${getArmyTitle(selectedOwnedCityArmy)} | ${selectedOwnedCityArmy.usedSlots}/${armyRules.maxSlotsPerArmy} slots in use`
+                    : "No city-center garrison yet"}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {RESOURCE_TRACKER_ORDER.map((resourceType) => {
@@ -1374,9 +1526,9 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
             <button
               type="button"
               onClick={handleOpenBuildModal}
-              disabled={playerReady || isResolving}
+              disabled={playerReady || isResolving || isLayer3BattleActive || selectedOwnedCityBlocked}
               className={`group inline-flex items-center justify-center gap-3 rounded-[24px] border px-4 py-3 text-left transition-all sm:min-w-[230px] ${
-                playerReady || isResolving
+                playerReady || isResolving || isLayer3BattleActive || selectedOwnedCityBlocked
                   ? "cursor-not-allowed border-white/8 bg-white/5 text-slate-500"
                   : "border-amber-300/20 bg-[linear-gradient(145deg,rgba(120,74,27,0.92),rgba(69,43,18,0.96))] text-amber-50 shadow-[0_18px_36px_rgba(75,43,13,0.38)] hover:-translate-y-0.5 hover:border-amber-200/35 hover:bg-[linear-gradient(145deg,rgba(144,90,35,0.96),rgba(86,55,24,0.98))]"
               }`}
@@ -1410,10 +1562,63 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
                   Open Production
                 </div>
                 <div className="mt-1 text-xs text-amber-50/75">
-                  Recruit a unit on an open city tile.
+                  {isLayer3BattleActive
+                    ? "Production resumes after the current Layer 3 battle."
+                    : selectedOwnedCityBlocked
+                    ? "Recruitment is blocked until the city center is clear."
+                    : "Create or reinforce the city-center garrison."}
                 </div>
               </div>
             </button>
+          </div>
+        </div>
+      )}
+
+      {selectedUnit && (
+        <div
+          className="absolute bottom-6 left-6 z-[72] w-[min(360px,calc(100%-1.5rem))] pointer-events-auto"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="rounded-[28px] border border-cyan-300/15 bg-[linear-gradient(160deg,rgba(11,19,30,0.96),rgba(7,13,21,0.96))] px-4 py-4 shadow-[0_24px_60px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+            <div className="text-[10px] font-black uppercase tracking-[0.34em] text-cyan-300/70">
+              Selected Army
+            </div>
+            <div className="mt-1 text-xl font-black text-white">{getArmyTitle(selectedUnit)}</div>
+            <div className="mt-1 text-sm text-slate-300/75">{getArmySubtitle(selectedUnit)}</div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <div className="rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">
+                Hex {selectedUnit.col}, {selectedUnit.row}
+              </div>
+              <div className="rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">
+                Slots {selectedUnit.usedSlots}/{armyRules.maxSlotsPerArmy}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2">
+              {selectedUnit.slots.map((slot, index) => {
+                const slotDisplay = UNIT_DISPLAY_INFO[slot.variantId] ?? FALLBACK_UNIT_DISPLAY;
+                return (
+                  <div
+                    key={`${selectedUnit.id}-${slot.variantId}-${index}`}
+                    className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 px-3 py-2.5"
+                  >
+                    <div>
+                      <div className="text-sm font-black text-white">{slotDisplay.name}</div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
+                        Slot {index + 1}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-black text-cyan-100">{slot.count}</div>
+                      <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                        strength
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -1428,7 +1633,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
               <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">
                 {myPendingCount} move{myPendingCount > 1 ? "s" : ""} queued
               </span>
-              {!playerReady && !isResolving && (
+              {!playerReady && !isResolving && !isLayer3BattleActive && (
                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
                   Cancel individually below
                 </span>
@@ -1451,9 +1656,9 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
                   <button
                     type="button"
                     onClick={() => handleCancelMove(unitId)}
-                    disabled={playerReady || isResolving}
+                    disabled={playerReady || isResolving || isLayer3BattleActive}
                     className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] transition-colors ${
-                      playerReady || isResolving
+                      playerReady || isResolving || isLayer3BattleActive
                         ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
                         : "border-rose-500/35 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
                     }`}
@@ -1469,13 +1674,13 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         <button
           id="end-turn-btn"
           onClick={playerReady ? handleCancelReady : handleEndTurn}
-          disabled={isResolving || !playerColor || (playerReady && opponentReady)}
+          disabled={isResolving || isLayer3BattleActive || !playerColor || (playerReady && opponentReady)}
           className={`flex items-center gap-2 rounded-xl border-2 px-6 py-3 text-sm font-black uppercase tracking-widest shadow-2xl backdrop-blur-md transition-all ${
             playerReady
               ? opponentReady
                 ? "cursor-default border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
                 : "border-rose-500/45 bg-rose-500/12 text-rose-300 hover:border-rose-400/60 hover:bg-rose-500/20 hover:text-rose-200"
-              : isResolving || !playerColor
+              : isResolving || isLayer3BattleActive || !playerColor
                 ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
                 : "border-amber-500/50 bg-amber-500/10 text-amber-400 hover:border-amber-400/60 hover:bg-amber-500/20 hover:text-amber-300"
           }`}
@@ -1494,6 +1699,8 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
             )
           ) : isResolving ? (
             "Resolving..."
+          ) : isLayer3BattleActive ? (
+            "Layer 3 Active"
           ) : (
             "End Turn"
           )}
@@ -1502,14 +1709,16 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
 
       {isBuildModalOpen && selectedOwnedCity && (
         <HexUnitProductionModal
+          armyRules={armyRules}
           buildError={buildError}
           city={selectedOwnedCity}
           cityIncome={selectedCityIncome}
-          isBusy={playerReady || isResolving}
+          isBusy={playerReady || isResolving || isLayer3BattleActive}
           onBuildUnit={handleBuildUnit}
           onClose={handleCloseBuildModal}
           playerColor={playerColor}
           resourceStockpile={currentResourceStockpile}
+          stationedArmy={selectedCityArmy}
           unitCatalog={unitProductionCatalog}
         />
       )}

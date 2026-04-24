@@ -21,6 +21,18 @@ export const INITIAL_TEAM_SELECTIONS = {
   red: { socketId: null, isOnline: false, hasDeployed: false },
 };
 
+export const INITIAL_LAYER3_BATTLE = {
+  status: "idle",
+  battleId: null,
+  queueLength: 0,
+  hex: null,
+  maxDurationSeconds: 180,
+  startedAtTick: null,
+  endsAtTick: null,
+  blueArmy: null,
+  redArmy: null,
+};
+
 export const UNIT_DISPLAY_INFO = {
   rifleman: {
     name: "Rifleman",
