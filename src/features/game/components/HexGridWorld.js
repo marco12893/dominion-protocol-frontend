@@ -271,7 +271,7 @@ function drawResourceBadge(ctx, spriteImages, resourceType, sx, sy) {
   const iconSize = RESOURCE_BADGE_SIZE;
 
   ctx.save();
-  ctx.fillStyle = "rgba(8, 15, 23, 0.92)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
   ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
   ctx.lineWidth = 1.2;
   ctx.beginPath();
@@ -364,11 +364,6 @@ function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages, cityHexMap, city
       drawSprite(ctx, tileImages, tile.terrainTile.improvementSpriteKey, tile.sx, tile.sy, {
         scale: tile.terrainTile.improvementType === "mine" ? 0.92 : 1,
       });
-      drawSprite(ctx, tileImages, tile.terrainTile.resourceSpriteKey, tile.sx, tile.sy, {
-        scale: 0.72,
-        offsetX: -15,
-        offsetY: -14,
-      });
     } else if (tile.terrainTile?.resourceSpriteKey) {
       drawSprite(ctx, tileImages, tile.terrainTile.resourceSpriteKey, tile.sx, tile.sy, {
         scale: 1,
@@ -380,7 +375,10 @@ function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages, cityHexMap, city
         scale: 1,
       });
     }
+  }
 
+  // Draw resource badges on top to prevent overlap with adjacent tiles
+  for (const tile of visibleTiles) {
     if (tile.terrainTile?.resourceType) {
       drawResourceBadge(ctx, tileImages, tile.terrainTile.resourceType, tile.sx, tile.sy);
     }
@@ -1421,7 +1419,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       )}
 
       <div
-        className="absolute bottom-6 left-1/2 z-[70] flex -translate-x-1/2 items-end gap-4 pointer-events-auto"
+        className="absolute bottom-6 right-6 z-[70] flex items-end gap-4 pointer-events-auto"
         onPointerDown={(event) => event.stopPropagation()}
       >
         {myPendingCount > 0 && (

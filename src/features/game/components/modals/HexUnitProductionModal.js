@@ -193,7 +193,7 @@ export default function HexUnitProductionModal({
                       return (
                         <div
                           key={resourceType}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-slate-950/50 px-2.5 py-1 text-xs font-semibold text-slate-100"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-100"
                         >
                           <img
                             src={RESOURCE_ICON_ASSETS[resourceType]}
