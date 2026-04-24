@@ -34,6 +34,8 @@ import {
   toMapPoint,
 } from "@/features/game/utils/gameHelpers";
 
+const POST_BATTLE_RETURN_DELAY_MS = 3000;
+
 export default function BattlefieldClient() {
   const socketRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -49,6 +51,8 @@ export default function BattlefieldClient() {
   const unitsByIdRef = useRef(new Map());
   const activeBattleIdRef = useRef(null);
   const centeredBattleIdRef = useRef(null);
+  const postBattleReturnTimeoutRef = useRef(null);
+  const worldTickRef = useRef(0);
 
   // High-frequency refs for rendering loop
   const unitsRef = useRef(INITIAL_UNITS);
@@ -82,10 +86,25 @@ export default function BattlefieldClient() {
   const [activeLayer, setActiveLayer] = useState(2);
   const [worldTick, setWorldTick] = useState(0);
   const [lastUpdateTimestamp, setLastUpdateTimestamp] = useState(0);
+  const [postBattleReturnDeadline, setPostBattleReturnDeadline] = useState(null);
+  const [preparationDeadline, setPreparationDeadline] = useState(null);
 
   const unitsById = new Map(units.map((unit) => [unit.id, unit]));
 
   const opponentColor = playerColor === "blue" ? "red" : "blue";
+
+  const clearPostBattleReturnTimeout = useCallback(() => {
+    if (postBattleReturnTimeoutRef.current !== null) {
+      window.clearTimeout(postBattleReturnTimeoutRef.current);
+      postBattleReturnTimeoutRef.current = null;
+    }
+  }, []);
+
+  const handleReturnToMap = useCallback(() => {
+    clearPostBattleReturnTimeout();
+    setPostBattleReturnDeadline(null);
+    setActiveLayer(2);
+  }, [clearPostBattleReturnTimeout]);
 
   useEffect(() => {
     latestStateRef.current = {
@@ -165,6 +184,22 @@ export default function BattlefieldClient() {
       visualEffectsRef.current = [];
 
       if (nextBattleId) {
+        clearPostBattleReturnTimeout();
+        setPostBattleReturnDeadline(null);
+        if (
+          nextLayer3Battle?.status === "countdown" &&
+          nextLayer3Battle.countdownEndsAtTick !== null
+        ) {
+          const countdownTicksRemaining = Math.max(
+            0,
+            nextLayer3Battle.countdownEndsAtTick - worldTickRef.current,
+          );
+          setPreparationDeadline(
+            Date.now() + countdownTicksRemaining * (1000 / 60),
+          );
+        } else {
+          setPreparationDeadline(null);
+        }
         const battleHexLabel = nextLayer3Battle?.hex
           ? `HEX ${nextLayer3Battle.hex.col},${nextLayer3Battle.hex.row}`
           : "CONTESTED HEX";
@@ -174,9 +209,24 @@ export default function BattlefieldClient() {
       } else if (previousBattleId) {
         addNotification("LAYER 3 ENGAGEMENT RESOLVED", "info");
         centeredBattleIdRef.current = null;
+        setPreparationDeadline(null);
+        clearPostBattleReturnTimeout();
+        const nextDeadline = Date.now() + POST_BATTLE_RETURN_DELAY_MS;
+        setPostBattleReturnDeadline(nextDeadline);
+        postBattleReturnTimeoutRef.current = window.setTimeout(() => {
+          postBattleReturnTimeoutRef.current = null;
+          setPostBattleReturnDeadline(null);
+          setActiveLayer(2);
+        }, POST_BATTLE_RETURN_DELAY_MS);
       }
 
       activeBattleIdRef.current = nextBattleId;
+    } else if (
+      nextBattleId &&
+      nextLayer3Battle?.status === "active" &&
+      preparationDeadline !== null
+    ) {
+      setPreparationDeadline(null);
     }
 
     if (
@@ -198,7 +248,11 @@ export default function BattlefieldClient() {
     const focusUnits = ownUnits.length > 0 ? ownUnits : nextUnits;
     setCamera(centerCameraOnUnits(focusUnits, viewport));
     centeredBattleIdRef.current = nextBattleId;
-  }, [addNotification]);
+  }, [addNotification, clearPostBattleReturnTimeout, preparationDeadline]);
+
+  useEffect(() => () => {
+    clearPostBattleReturnTimeout();
+  }, [clearPostBattleReturnTimeout]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -510,6 +564,8 @@ export default function BattlefieldClient() {
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("game:reset", () => {
+      clearPostBattleReturnTimeout();
+      setPreparationDeadline(null);
       setPlayerColor(null);
       setSelectedUnitIds([]);
       selectedUnitIdsRef.current = [];
@@ -530,6 +586,8 @@ export default function BattlefieldClient() {
       visualEffectsRef.current = [];
       activeBattleIdRef.current = null;
       centeredBattleIdRef.current = null;
+      worldTickRef.current = 0;
+      setPostBattleReturnDeadline(null);
       setActiveLayer(2);
       setWorldTick(0);
     });
@@ -578,6 +636,7 @@ export default function BattlefieldClient() {
       const nextLayer3Battle = normalizeLayer3BattleState(snapshot?.layer3Battle);
       setLayer3Battle(nextLayer3Battle);
       if (typeof snapshot?.tick === "number") {
+        worldTickRef.current = snapshot.tick;
         setWorldTick(snapshot.tick);
       }
 
@@ -608,6 +667,7 @@ export default function BattlefieldClient() {
         setLayer3Battle(nextLayer3Battle);
       }
       if (typeof delta?.tick === "number") {
+        worldTickRef.current = delta.tick;
         setWorldTick(delta.tick);
       }
 
@@ -636,10 +696,11 @@ export default function BattlefieldClient() {
     });
 
     return () => {
+      clearPostBattleReturnTimeout();
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [handleLayer3BattleUpdate]);
+  }, [clearPostBattleReturnTimeout, handleLayer3BattleUpdate]);
 
   useEffect(() => {
     if (!selectionBox) {
@@ -901,15 +962,24 @@ export default function BattlefieldClient() {
     !!playerColor &&
     !!teamSelections[opponentColor]?.socketId &&
     !teamSelections[opponentColor]?.isOnline;
+  const remainingPreparationSeconds =
+    layer3Battle.status === "countdown" && preparationDeadline !== null
+      ? Math.max(0, Math.ceil((preparationDeadline - Date.now()) / 1000))
+      : 0;
   const remainingBattleSeconds =
     layer3Battle.status === "active" && layer3Battle.endsAtTick !== null
       ? Math.max(0, Math.ceil((layer3Battle.endsAtTick - worldTick) / 60))
       : 0;
+  const postBattleReturnSeconds = postBattleReturnDeadline
+    ? Math.max(0, Math.ceil((postBattleReturnDeadline - Date.now()) / 1000))
+    : 0;
   const battleClockLabel =
     layer3Battle.status === "active"
       ? `${String(Math.floor(remainingBattleSeconds / 60)).padStart(2, "0")}:${String(
         remainingBattleSeconds % 60,
       ).padStart(2, "0")}`
+      : layer3Battle.status === "countdown"
+        ? `${String(remainingPreparationSeconds).padStart(2, "0")}s`
       : "--:--";
 
   return (
@@ -923,7 +993,6 @@ export default function BattlefieldClient() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
         activeLayer={activeLayer}
-        onToggleLayer={() => setActiveLayer((l) => (l === 3 ? 2 : 3))}
         layer3Battle={layer3Battle}
         battleClockLabel={battleClockLabel}
       />
@@ -1003,7 +1072,50 @@ export default function BattlefieldClient() {
             </div>
           )}
 
-          {layer3Battle.status !== "active" && (
+          {postBattleReturnDeadline && (
+            <div className="fixed right-4 top-24 z-[96] rounded-full border border-cyan-300/20 bg-[#09111acc]/92 px-4 py-2 text-[11px] font-black uppercase tracking-[0.24em] text-cyan-100 shadow-[0_16px_36px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+              Auto-return in {postBattleReturnSeconds}s
+            </div>
+          )}
+
+          {layer3Battle.status === "countdown" ? (
+            <div className="fixed inset-0 z-[95] flex items-center justify-center pointer-events-none">
+              <div className="mx-6 max-w-xl rounded-[28px] border border-white/10 bg-[#09111acc]/92 px-8 py-7 text-center shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+                <div className="text-[10px] font-black uppercase tracking-[0.34em] text-cyan-300/70">
+                  Engagement Countdown
+                </div>
+                <div className="mt-4 text-6xl font-black text-white">
+                  {remainingPreparationSeconds}
+                </div>
+                <div className="mt-3 text-sm text-slate-300/80">
+                  Troops are deployed in opposite corners and will hold position until the
+                  countdown ends. Layer 3 command input unlocks when the engagement begins.
+                </div>
+              </div>
+            </div>
+          ) : postBattleReturnDeadline ? (
+            <div className="fixed inset-0 z-[95] flex items-center justify-center">
+              <div className="mx-6 w-full max-w-xl rounded-[28px] border border-cyan-300/15 bg-[#09111acc]/94 px-8 py-7 text-center shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+                <div className="text-[10px] font-black uppercase tracking-[0.34em] text-cyan-300/70">
+                  Engagement Complete
+                </div>
+                <div className="mt-3 text-2xl font-black text-white">
+                  Return to the strategic map
+                </div>
+                <div className="mt-3 text-sm text-slate-300/80">
+                  Surviving units have been written back to Layer 2. You can return now, or
+                  the map will open automatically in a few seconds.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReturnToMap}
+                  className="mt-6 inline-flex items-center justify-center rounded-2xl bg-cyan-300 px-6 py-3 text-xs font-black uppercase tracking-[0.28em] text-slate-950 shadow-[0_18px_36px_rgba(34,211,238,0.2)] transition-transform hover:-translate-y-0.5 hover:bg-cyan-200"
+                >
+                  Return to Map
+                </button>
+              </div>
+            </div>
+          ) : layer3Battle.status === "idle" ? (
             <div className="fixed inset-0 z-[95] flex items-center justify-center pointer-events-none">
               <div className="mx-6 max-w-xl rounded-[28px] border border-white/10 bg-[#09111acc]/92 px-8 py-7 text-center shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
                 <div className="text-[10px] font-black uppercase tracking-[0.34em] text-cyan-300/70">
@@ -1019,7 +1131,7 @@ export default function BattlefieldClient() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
         </>
       ) : (
         <>

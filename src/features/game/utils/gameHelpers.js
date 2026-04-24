@@ -205,13 +205,19 @@ export function normalizeLayer3BattleState(layer3Battle) {
     ...(layer3Battle ?? {}),
   };
 
-  normalizedBattle.status = normalizedBattle.status === "active" ? "active" : "idle";
+  normalizedBattle.status =
+    normalizedBattle.status === "active" || normalizedBattle.status === "countdown"
+      ? normalizedBattle.status
+      : "idle";
   normalizedBattle.battleId =
     typeof normalizedBattle.battleId === "string" ? normalizedBattle.battleId : null;
   normalizedBattle.queueLength = Math.max(
     0,
     Math.floor(Number(normalizedBattle.queueLength) || 0),
   );
+  normalizedBattle.countdownEndsAtTick = Number.isFinite(Number(normalizedBattle.countdownEndsAtTick))
+    ? Number(normalizedBattle.countdownEndsAtTick)
+    : null;
   normalizedBattle.startedAtTick = Number.isFinite(Number(normalizedBattle.startedAtTick))
     ? Number(normalizedBattle.startedAtTick)
     : null;

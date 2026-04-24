@@ -138,11 +138,11 @@ export default function HexUnitProductionModal({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.45em] text-amber-300/75">
-                City Foundry
+                Urban Area Foundry
               </div>
               <h2 className="mt-2 text-3xl font-black text-white">{city.name ?? city.id}</h2>
               <p className="mt-2 max-w-2xl text-sm text-slate-300/75">
-                Recruit strength directly into the city-center garrison. Overflow from a full slot
+                Recruit strength directly into the urban-area garrison. Overflow from a full slot
                 automatically spills into the next free army slot until the six-slot cap is reached.
               </p>
             </div>
@@ -174,7 +174,7 @@ export default function HexUnitProductionModal({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
-                    City Garrison
+                    Urban Area Garrison
                   </div>
                   <div className="mt-2 text-lg font-black text-white">
                     {hostileOccupant
@@ -185,10 +185,10 @@ export default function HexUnitProductionModal({
                   </div>
                   <div className="mt-1 text-sm text-slate-300/75">
                     {hostileOccupant
-                      ? "Hostile forces are sitting on the city center. Clear them before recruiting."
+                      ? "Hostile forces are sitting on the urban-area center. Clear them before recruiting."
                       : friendlyStationedArmy
                         ? getArmySubtitle(friendlyStationedArmy)
-                        : "The first purchase here will create a fresh city-center army."}
+                        : "The first purchase here will create a fresh urban-area army."}
                   </div>
                 </div>
 
@@ -249,7 +249,7 @@ export default function HexUnitProductionModal({
 
               <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/8 px-4 py-3">
                 <div className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300/70">
-                  City Yield
+                  Urban Yield
                 </div>
                 <div className="mt-3">
                   <ResourceValueRow counts={cityIncome} accentClassName="text-emerald-100" />
@@ -291,9 +291,9 @@ export default function HexUnitProductionModal({
                 requestedQuantity <= roomInArmy &&
                 canAffordRequested;
 
-              let helperLabel = "Recruit directly into the city-center army";
+              let helperLabel = "Recruit directly into the urban-area garrison";
               if (hostileOccupant) {
-                helperLabel = "City center occupied by hostile forces";
+                helperLabel = "Urban area center occupied by hostile forces";
               } else if (roomInArmy <= 0) {
                 helperLabel = "No slot capacity remains for this unit type";
               } else if (affordableQuantity <= 0) {

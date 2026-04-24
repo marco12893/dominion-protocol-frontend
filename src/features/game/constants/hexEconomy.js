@@ -1,4 +1,8 @@
-import { getHexesInRange } from "@/features/game/utils/hexMath";
+import {
+  URBAN_AREA_BASE_RESOURCE_YIELDS,
+  getUrbanAreaHexes,
+  normalizeUrbanAreaTier,
+} from "@/features/game/constants/hexUrbanAreas";
 
 export const RESOURCE_TRACKER_ORDER = ["gold", "oil", "iron", "wheat"];
 
@@ -74,9 +78,12 @@ export function hasAnyResourceValue(counts = {}) {
 }
 
 export function computeCityIncome(city, terrainGrid, cols, rows) {
-  const income = normalizeResourceCounts({ gold: CITY_BASE_GOLD_INCOME });
+  const tier = normalizeUrbanAreaTier(city?.tier);
+  const income = normalizeResourceCounts(
+    URBAN_AREA_BASE_RESOURCE_YIELDS[tier] ?? { gold: CITY_BASE_GOLD_INCOME },
+  );
 
-  for (const hex of getHexesInRange(city.centerCol, city.centerRow, 1, cols, rows)) {
+  for (const hex of getUrbanAreaHexes(city, cols, rows)) {
     const tile = terrainGrid[hex.row * cols + hex.col];
     const yieldDefinition = IMPROVEMENT_RESOURCE_YIELDS[tile?.improvementType];
     if (!yieldDefinition) {

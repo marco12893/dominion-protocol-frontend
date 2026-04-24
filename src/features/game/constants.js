@@ -27,6 +27,7 @@ export const INITIAL_LAYER3_BATTLE = {
   queueLength: 0,
   hex: null,
   maxDurationSeconds: 180,
+  countdownEndsAtTick: null,
   startedAtTick: null,
   endsAtTick: null,
   blueArmy: null,

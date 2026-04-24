@@ -11,7 +11,6 @@ import {
   hexToPixel,
   pixelToHex,
   hexCorners,
-  getHexesInRange,
   getHexNeighbors,
   getTraversableHexesInRange,
 } from "@/features/game/utils/hexMath";
@@ -31,6 +30,15 @@ import {
   normalizeResourceLedger,
 } from "@/features/game/constants/hexEconomy";
 import {
+  URBAN_AREA_TIER_LABELS,
+  URBAN_AREA_UPGRADE_COSTS,
+  buildUrbanAreaOwnershipMap,
+  getNextUrbanAreaTier,
+  getUrbanAreaHexes,
+  getUrbanAreaRange,
+  normalizeUrbanAreaTier,
+} from "@/features/game/constants/hexUrbanAreas";
+import {
   DEFAULT_ARMY_RULES,
   getArmyShortLabel,
   getArmySubtitle,
@@ -48,7 +56,6 @@ const LAST_HEX = hexToPixel(GRID_COLS - 1, GRID_ROWS - 1, HEX_SIZE);
 const HEX_WORLD_WIDTH = LAST_HEX.x + HEX_SIZE * 2 + WORLD_PADDING;
 const HEX_WORLD_HEIGHT = LAST_HEX.y + HEX_SIZE * 2 + WORLD_PADDING;
 const MOVEMENT_RANGE = 2;
-const CITY_BORDER_RANGE = 1;
 const TILE_HALF_WIDTH = HEX_BASE_TILE_WIDTH / 2;
 const TILE_HALF_HEIGHT = HEX_BASE_TILE_HEIGHT / 2;
 const RESOURCE_BADGE_SIZE = 18;
@@ -115,8 +122,8 @@ const TERRAIN_FALLBACK_COLORS = {
 const PLAYER_COLORS = ["blue", "red"];
 
 const DEFAULT_CITIES = [
-  { id: "city-blue", name: "Azure Crown", centerCol: 6, centerRow: 6, owner: "blue" },
-  { id: "city-red", name: "Crimson Forge", centerCol: 33, centerRow: 22, owner: "red" },
+  { id: "city-blue", name: "Azure Crown", centerCol: 6, centerRow: 6, owner: "blue", tier: "town" },
+  { id: "city-red", name: "Crimson Forge", centerCol: 33, centerRow: 22, owner: "red", tier: "town" },
 ];
 
 const INITIAL_HEX_UNITS = [
@@ -158,7 +165,7 @@ function buildTerrainGrid(terrainTiles = []) {
 }
 
 function getCityHexes(city) {
-  return getHexesInRange(city.centerCol, city.centerRow, CITY_BORDER_RANGE, GRID_COLS, GRID_ROWS);
+  return getUrbanAreaHexes(city, GRID_COLS, GRID_ROWS);
 }
 
 function drawHexPath(ctx, cx, cy, size) {
@@ -667,6 +674,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   const [layer3Battle, setLayer3Battle] = useState(() => normalizeLayer3BattleState());
   const [isBuildModalOpen, setIsBuildModalOpen] = useState(false);
   const [buildError, setBuildError] = useState("");
+  const [upgradeError, setUpgradeError] = useState("");
   const [resourceStockpiles, setResourceStockpiles] = useState(
     normalizeResourceLedger({}, PLAYER_COLORS),
   );
@@ -675,7 +683,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   );
   const [unitProductionCatalog, setUnitProductionCatalog] = useState({});
   const [armyRules, setArmyRules] = useState(DEFAULT_ARMY_RULES);
-  const isLayer3BattleActive = layer3Battle.status === "active";
+  const isLayer3BattleLocked = layer3Battle.status !== "idle";
 
   const hexUnitsRef = useRef(hexUnits);
   useEffect(() => {
@@ -757,6 +765,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       setUnitProductionCatalog(snapshot?.unitProductionCatalog ?? {});
       setArmyRules(nextArmyRules);
       setBuildError("");
+      setUpgradeError("");
       setLayer3Battle(normalizeLayer3BattleState(snapshot?.layer3Battle));
 
       const readyPlayers = Array.isArray(snapshot?.readyPlayers) ? snapshot.readyPlayers : [];
@@ -822,6 +831,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       setPlayerReady(false);
       setOpponentReady(false);
       setBuildError("");
+      setUpgradeError("");
       setIsBuildModalOpen(false);
       setLayer3Battle(normalizeLayer3BattleState(resolved?.layer3Battle));
 
@@ -865,10 +875,15 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       setBuildError(rejected?.error || "Unable to build unit.");
     }
 
+    function handleUpgradeRejected(rejected) {
+      setUpgradeError(rejected?.error || "Unable to upgrade urban area.");
+    }
+
     socket.on("hex:state", applyState);
     socket.on("hex:moveSubmitted", handleMoveSubmitted);
     socket.on("hex:moveCancelled", handleMoveCancelled);
     socket.on("hex:buildRejected", handleBuildRejected);
+    socket.on("hex:upgradeRejected", handleUpgradeRejected);
     socket.on("hex:playerReady", handlePlayerReady);
     socket.on("hex:playerUnready", handlePlayerUnready);
     socket.on("hex:turnResolved", handleTurnResolved);
@@ -880,6 +895,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       socket.off("hex:moveSubmitted", handleMoveSubmitted);
       socket.off("hex:moveCancelled", handleMoveCancelled);
       socket.off("hex:buildRejected", handleBuildRejected);
+      socket.off("hex:upgradeRejected", handleUpgradeRejected);
       socket.off("hex:playerReady", handlePlayerReady);
       socket.off("hex:playerUnready", handlePlayerUnready);
       socket.off("hex:turnResolved", handleTurnResolved);
@@ -908,15 +924,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   );
 
   const cityHexMap = useMemo(() => {
-    const nextMap = new Map();
-
-    for (const city of cities) {
-      for (const hex of getCityHexes(city)) {
-        nextMap.set(getHexKey(hex.col, hex.row), city.owner);
-      }
-    }
-
-    return nextMap;
+    return buildUrbanAreaOwnershipMap(cities, GRID_COLS, GRID_ROWS).ownerByTileKey;
   }, [cities]);
 
   const cityCenterSet = useMemo(
@@ -967,6 +975,16 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
     ),
     [selectedOwnedCity, terrainGrid],
   );
+  const selectedOwnedCityTier = normalizeUrbanAreaTier(selectedOwnedCity?.tier);
+  const selectedOwnedCityNextTier = selectedOwnedCity
+    ? getNextUrbanAreaTier(selectedOwnedCityTier)
+    : null;
+  const selectedOwnedCityUpgradeCost = selectedOwnedCityNextTier
+    ? normalizeResourceCounts(URBAN_AREA_UPGRADE_COSTS[selectedOwnedCityTier])
+    : normalizeResourceCounts({});
+  const selectedOwnedCityRange = selectedOwnedCity
+    ? getUrbanAreaRange(selectedOwnedCity)
+    : 0;
 
   const currentResourceStockpile = useMemo(
     () => normalizeResourceCounts(resourceStockpiles[playerColor]),
@@ -1027,7 +1045,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
         !selectedUnit ||
         selectedUnit.owner !== playerColor ||
         movedUnitIds.has(selectedUnit.id) ||
-        layer3Battle.status === "active"
+        isLayer3BattleLocked
       ) {
         return [];
       }
@@ -1063,7 +1081,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
         },
       );
     },
-    [hexUnits, layer3Battle.status, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
+    [hexUnits, isLayer3BattleLocked, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
   );
 
   const moveHexSet = useMemo(
@@ -1188,7 +1206,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   }, [clampCam]);
 
   function handlePointerDown(event) {
-    if (event.button !== 0 || isResolving || isLayer3BattleActive || !playerColor || playerReady) {
+    if (event.button !== 0 || isResolving || isLayer3BattleLocked || !playerColor || playerReady) {
       return;
     }
 
@@ -1211,6 +1229,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
     if (clickedCity) {
       setSelectedCityId(clickedCity.id);
       setBuildError("");
+      setUpgradeError("");
       setIsBuildModalOpen(false);
 
       if (clickedFriendlyUnit?.owner === playerColor) {
@@ -1227,10 +1246,12 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
         setSelectedUnitId(clickedUnit.id);
         setSelectedCityId(null);
         setIsBuildModalOpen(false);
+        setUpgradeError("");
       } else {
         setSelectedUnitId(null);
         setSelectedCityId(null);
         setIsBuildModalOpen(false);
+        setUpgradeError("");
       }
       return;
     }
@@ -1238,10 +1259,11 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
     setSelectedUnitId(null);
     setSelectedCityId(null);
     setIsBuildModalOpen(false);
+    setUpgradeError("");
   }
 
   function handleEndTurn() {
-    if (playerReady || isResolving || isLayer3BattleActive) {
+    if (playerReady || isResolving || isLayer3BattleLocked) {
       return;
     }
 
@@ -1249,7 +1271,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   }
 
   function handleCancelReady() {
-    if (!playerReady || opponentReady || isResolving || isLayer3BattleActive) {
+    if (!playerReady || opponentReady || isResolving || isLayer3BattleLocked) {
       return;
     }
 
@@ -1257,7 +1279,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
   }
 
   function handleCancelMove(unitId) {
-    if (!unitId || playerReady || isResolving || isLayer3BattleActive) {
+    if (!unitId || playerReady || isResolving || isLayer3BattleLocked) {
       return;
     }
 
@@ -1274,12 +1296,13 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       selectedOwnedCityBlocked ||
       playerReady ||
       isResolving ||
-      isLayer3BattleActive
+      isLayer3BattleLocked
     ) {
       return;
     }
 
     setBuildError("");
+    setUpgradeError("");
     setIsBuildModalOpen(true);
   }
 
@@ -1296,7 +1319,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       normalizedQuantity <= 0 ||
       playerReady ||
       isResolving ||
-      isLayer3BattleActive
+      isLayer3BattleLocked
     ) {
       return;
     }
@@ -1306,6 +1329,24 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
       cityId: selectedOwnedCity.id,
       variantId,
       quantity: normalizedQuantity,
+    });
+  }
+
+  function handleUpgradeCity() {
+    if (
+      !selectedOwnedCity ||
+      !selectedOwnedCityNextTier ||
+      selectedOwnedCityBlocked ||
+      playerReady ||
+      isResolving ||
+      isLayer3BattleLocked
+    ) {
+      return;
+    }
+
+    setUpgradeError("");
+    socketRef.current?.emit("hex:upgradeCity", {
+      cityId: selectedOwnedCity.id,
     });
   }
 
@@ -1462,7 +1503,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
         </div>
       )}
 
-      {isLayer3BattleActive && (
+      {isLayer3BattleLocked && (
         <div
           className="absolute left-1/2 top-[104px] z-[82] w-[min(720px,calc(100%-1.5rem))] -translate-x-1/2 rounded-[22px] border border-amber-300/20 bg-[linear-gradient(145deg,rgba(78,48,17,0.92),rgba(36,23,9,0.95))] px-4 py-3 text-amber-50 shadow-[0_24px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl"
           onPointerDown={(event) => event.stopPropagation()}
@@ -1471,105 +1512,180 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
             Layer 2 Paused
           </div>
           <div className="mt-1 text-sm font-semibold">
-            Layer 3 battle active at hex {layer3Battle.hex?.col}, {layer3Battle.hex?.row}.
-            Strategic moves and city production are locked until the engagement ends.
+            {layer3Battle.status === "countdown"
+              ? `Layer 3 engagement countdown active at hex ${layer3Battle.hex?.col}, ${layer3Battle.hex?.row}.`
+              : `Layer 3 battle active at hex ${layer3Battle.hex?.col}, ${layer3Battle.hex?.row}.`}{" "}
+            Strategic moves, upgrades, and unit production are locked until the engagement ends.
           </div>
         </div>
       )}
 
       {selectedOwnedCity && (
         <div
-          className="absolute bottom-28 left-1/2 z-[85] w-[min(680px,calc(100%-1.5rem))] -translate-x-1/2 pointer-events-auto"
+          className="absolute bottom-28 left-1/2 z-[85] w-[min(920px,calc(100%-1.5rem))] -translate-x-1/2 pointer-events-auto"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <div className="flex flex-col gap-3 rounded-[28px] border border-amber-300/15 bg-[linear-gradient(160deg,rgba(18,31,42,0.95),rgba(10,18,27,0.96))] px-4 py-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div className="min-w-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.35em] text-amber-300/70">
-                Selected City
-              </div>
-              <div className="mt-1 text-xl font-black text-white">
-                {selectedOwnedCity.name ?? selectedOwnedCity.id}
-              </div>
-              <div className="mt-2 text-sm text-slate-300/80">
-                {isLayer3BattleActive
-                  ? "Layer 2 actions are paused while the Layer 3 battle resolves."
-                  : selectedOwnedCityBlocked
-                  ? "City center occupied by hostile forces"
-                  : selectedOwnedCityArmy
-                    ? `${getArmyTitle(selectedOwnedCityArmy)} | ${selectedOwnedCityArmy.usedSlots}/${armyRules.maxSlotsPerArmy} slots in use`
-                    : "No city-center garrison yet"}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {RESOURCE_TRACKER_ORDER.map((resourceType) => {
-                  const incomeValue = selectedCityIncome[resourceType];
-                  if (incomeValue <= 0) {
-                    return null;
-                  }
+          <div className="rounded-[28px] border border-amber-300/15 bg-[linear-gradient(160deg,rgba(18,31,42,0.95),rgba(10,18,27,0.96))] px-4 py-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)] backdrop-blur-xl sm:px-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.35em] text-amber-300/70">
+                  Selected Urban Area
+                </div>
+                <div className="mt-1 text-xl font-black text-white">
+                  {selectedOwnedCity.name ?? selectedOwnedCity.id}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="rounded-full border border-amber-300/15 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-amber-100">
+                    {URBAN_AREA_TIER_LABELS[selectedOwnedCityTier]}
+                  </div>
+                  <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-300">
+                    Radius {selectedOwnedCityRange}
+                  </div>
+                </div>
+                <div className="mt-3 text-sm text-slate-300/80">
+                  {isLayer3BattleLocked
+                    ? "Layer 2 actions are paused while the Layer 3 battle resolves."
+                    : selectedOwnedCityBlocked
+                    ? "Urban area center occupied by hostile forces"
+                    : selectedOwnedCityArmy
+                      ? `${getArmyTitle(selectedOwnedCityArmy)} | ${selectedOwnedCityArmy.usedSlots}/${armyRules.maxSlotsPerArmy} slots in use`
+                      : "No urban-area garrison yet"}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {RESOURCE_TRACKER_ORDER.map((resourceType) => {
+                    const incomeValue = selectedCityIncome[resourceType];
+                    if (incomeValue <= 0) {
+                      return null;
+                    }
 
-                  return (
-                    <div
-                      key={resourceType}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-100"
+                    return (
+                      <div
+                        key={resourceType}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-100"
+                      >
+                        <img
+                          src={RESOURCE_ICON_ASSETS[resourceType]}
+                          alt={RESOURCE_LABELS[resourceType]}
+                          className="h-4 w-4 object-contain"
+                        />
+                        <span>+{incomeValue}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex w-full flex-col gap-3 lg:max-w-[320px]">
+                <button
+                  type="button"
+                  onClick={handleOpenBuildModal}
+                  disabled={playerReady || isResolving || isLayer3BattleLocked || selectedOwnedCityBlocked}
+                  className={`group inline-flex items-center justify-center gap-3 rounded-[24px] border px-4 py-3 text-left transition-all ${
+                    playerReady || isResolving || isLayer3BattleLocked || selectedOwnedCityBlocked
+                      ? "cursor-not-allowed border-white/8 bg-white/5 text-slate-500"
+                      : "border-amber-300/20 bg-[linear-gradient(145deg,rgba(120,74,27,0.92),rgba(69,43,18,0.96))] text-amber-50 shadow-[0_18px_36px_rgba(75,43,13,0.38)] hover:-translate-y-0.5 hover:border-amber-200/35 hover:bg-[linear-gradient(145deg,rgba(144,90,35,0.96),rgba(86,55,24,0.98))]"
+                  }`}
+                >
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-black/15 bg-black/10 shadow-inner">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="26"
+                      height="26"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     >
-                      <img
-                        src={RESOURCE_ICON_ASSETS[resourceType]}
-                        alt={RESOURCE_LABELS[resourceType]}
-                        className="h-4 w-4 object-contain"
-                      />
-                      <span>+{incomeValue}</span>
+                      <path d="m14 6 4 4" />
+                      <path d="m12.5 7.5-7 7" />
+                      <path d="m5.5 14.5-2 4 4-2" />
+                      <path d="m7 4 13 13" />
+                      <path d="m6.5 8-2.7-2.7a1.8 1.8 0 0 1 2.6-2.6L9 5.3" />
+                      <path d="m15 11.3 3.7 3.7a1.8 1.8 0 1 1-2.6 2.6L12.4 14" />
+                    </svg>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-100/70">
+                      Urban Area Tools
                     </div>
-                  );
-                })}
+                    <div className="mt-1 text-sm font-black uppercase tracking-[0.2em]">
+                      Open Production
+                    </div>
+                    <div className="mt-1 text-xs text-amber-50/75">
+                      {isLayer3BattleLocked
+                        ? "Production resumes after the current Layer 3 battle."
+                        : selectedOwnedCityBlocked
+                          ? "Recruitment is blocked until the urban-area center is clear."
+                          : "Create or reinforce the urban-area garrison."}
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUpgradeCity}
+                  disabled={
+                    !selectedOwnedCityNextTier ||
+                    playerReady ||
+                    isResolving ||
+                    isLayer3BattleLocked ||
+                    selectedOwnedCityBlocked
+                  }
+                  className={`rounded-[24px] border px-4 py-3 text-left transition-all ${
+                    !selectedOwnedCityNextTier || playerReady || isResolving || isLayer3BattleLocked || selectedOwnedCityBlocked
+                      ? "cursor-not-allowed border-white/8 bg-white/5 text-slate-500"
+                      : "border-cyan-300/20 bg-[linear-gradient(145deg,rgba(19,72,94,0.9),rgba(10,38,52,0.96))] text-cyan-50 shadow-[0_18px_36px_rgba(10,60,80,0.35)] hover:-translate-y-0.5 hover:border-cyan-200/35 hover:bg-[linear-gradient(145deg,rgba(28,92,118,0.96),rgba(14,50,68,0.98))]"
+                  }`}
+                >
+                  <div className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-100/70">
+                    Urban Expansion
+                  </div>
+                  <div className="mt-1 text-sm font-black uppercase tracking-[0.2em]">
+                    {selectedOwnedCityNextTier
+                      ? `Upgrade to ${URBAN_AREA_TIER_LABELS[selectedOwnedCityNextTier]}`
+                      : "Maximum Tier Reached"}
+                  </div>
+                  <div className="mt-1 text-xs text-cyan-50/75">
+                    {selectedOwnedCityNextTier
+                      ? `Expand control to radius ${getUrbanAreaRange(selectedOwnedCityNextTier)} and convert more resource tiles into working improvements.`
+                      : "This urban area already controls the full metropolis radius."}
+                  </div>
+                  {selectedOwnedCityNextTier && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {RESOURCE_TRACKER_ORDER.map((resourceType) => {
+                        const costValue = selectedOwnedCityUpgradeCost[resourceType];
+                        if (costValue <= 0) {
+                          return null;
+                        }
+
+                        return (
+                          <div
+                            key={resourceType}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-100"
+                          >
+                            <img
+                              src={RESOURCE_ICON_ASSETS[resourceType]}
+                              alt={RESOURCE_LABELS[resourceType]}
+                              className="h-4 w-4 object-contain"
+                            />
+                            <span>{costValue}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </button>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleOpenBuildModal}
-              disabled={playerReady || isResolving || isLayer3BattleActive || selectedOwnedCityBlocked}
-              className={`group inline-flex items-center justify-center gap-3 rounded-[24px] border px-4 py-3 text-left transition-all sm:min-w-[230px] ${
-                playerReady || isResolving || isLayer3BattleActive || selectedOwnedCityBlocked
-                  ? "cursor-not-allowed border-white/8 bg-white/5 text-slate-500"
-                  : "border-amber-300/20 bg-[linear-gradient(145deg,rgba(120,74,27,0.92),rgba(69,43,18,0.96))] text-amber-50 shadow-[0_18px_36px_rgba(75,43,13,0.38)] hover:-translate-y-0.5 hover:border-amber-200/35 hover:bg-[linear-gradient(145deg,rgba(144,90,35,0.96),rgba(86,55,24,0.98))]"
-              }`}
-            >
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-black/15 bg-black/10 shadow-inner">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="26"
-                  height="26"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.9"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m14 6 4 4" />
-                  <path d="m12.5 7.5-7 7" />
-                  <path d="m5.5 14.5-2 4 4-2" />
-                  <path d="m7 4 13 13" />
-                  <path d="m6.5 8-2.7-2.7a1.8 1.8 0 0 1 2.6-2.6L9 5.3" />
-                  <path d="m15 11.3 3.7 3.7a1.8 1.8 0 1 1-2.6 2.6L12.4 14" />
-                </svg>
+            {upgradeError && (
+              <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-200">
+                {upgradeError}
               </div>
-
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-100/70">
-                  City Tools
-                </div>
-                <div className="mt-1 text-sm font-black uppercase tracking-[0.2em]">
-                  Open Production
-                </div>
-                <div className="mt-1 text-xs text-amber-50/75">
-                  {isLayer3BattleActive
-                    ? "Production resumes after the current Layer 3 battle."
-                    : selectedOwnedCityBlocked
-                    ? "Recruitment is blocked until the city center is clear."
-                    : "Create or reinforce the city-center garrison."}
-                </div>
-              </div>
-            </button>
+            )}
           </div>
         </div>
       )}
@@ -1633,7 +1749,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
               <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">
                 {myPendingCount} move{myPendingCount > 1 ? "s" : ""} queued
               </span>
-              {!playerReady && !isResolving && !isLayer3BattleActive && (
+              {!playerReady && !isResolving && !isLayer3BattleLocked && (
                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
                   Cancel individually below
                 </span>
@@ -1656,9 +1772,9 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
                   <button
                     type="button"
                     onClick={() => handleCancelMove(unitId)}
-                    disabled={playerReady || isResolving || isLayer3BattleActive}
+                    disabled={playerReady || isResolving || isLayer3BattleLocked}
                     className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] transition-colors ${
-                      playerReady || isResolving || isLayer3BattleActive
+                      playerReady || isResolving || isLayer3BattleLocked
                         ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
                         : "border-rose-500/35 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
                     }`}
@@ -1674,13 +1790,13 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
         <button
           id="end-turn-btn"
           onClick={playerReady ? handleCancelReady : handleEndTurn}
-          disabled={isResolving || isLayer3BattleActive || !playerColor || (playerReady && opponentReady)}
+          disabled={isResolving || isLayer3BattleLocked || !playerColor || (playerReady && opponentReady)}
           className={`flex items-center gap-2 rounded-xl border-2 px-6 py-3 text-sm font-black uppercase tracking-widest shadow-2xl backdrop-blur-md transition-all ${
             playerReady
               ? opponentReady
                 ? "cursor-default border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
                 : "border-rose-500/45 bg-rose-500/12 text-rose-300 hover:border-rose-400/60 hover:bg-rose-500/20 hover:text-rose-200"
-              : isResolving || isLayer3BattleActive || !playerColor
+              : isResolving || isLayer3BattleLocked || !playerColor
                 ? "cursor-not-allowed border-white/5 bg-white/5 text-slate-600"
                 : "border-amber-500/50 bg-amber-500/10 text-amber-400 hover:border-amber-400/60 hover:bg-amber-500/20 hover:text-amber-300"
           }`}
@@ -1699,8 +1815,8 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
             )
           ) : isResolving ? (
             "Resolving..."
-          ) : isLayer3BattleActive ? (
-            "Layer 3 Active"
+          ) : isLayer3BattleLocked ? (
+            "Layer 3 Locked"
           ) : (
             "End Turn"
           )}
@@ -1713,7 +1829,7 @@ export default function HexGridWorld({ windowSize, playerColor, socketRef, isSoc
           buildError={buildError}
           city={selectedOwnedCity}
           cityIncome={selectedCityIncome}
-          isBusy={playerReady || isResolving || isLayer3BattleActive}
+          isBusy={playerReady || isResolving || isLayer3BattleLocked}
           onBuildUnit={handleBuildUnit}
           onClose={handleCloseBuildModal}
           playerColor={playerColor}
