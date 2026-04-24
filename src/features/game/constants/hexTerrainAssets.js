@@ -24,6 +24,10 @@ export const HEX_SPRITE_ASSETS = {
   "Farm+Wheat": "/assets/tiles/GameTiles/Farm+Wheat.png",
   Mine: "/assets/tiles/GameTiles/Mine-Industrial era.png",
   "Oil+Oil well": "/assets/tiles/GameTiles/Oil+Oil well.png",
+  MarkerGold: "/assets/Resources/Gold Ore.png",
+  MarkerOil: "/assets/Resources/Oil.png",
+  MarkerIron: "/assets/Resources/Iron.png",
+  MarkerWheat: "/assets/Resources/Wheat.png",
 };
 
 export const HEX_BASE_TILE_WIDTH = 64;

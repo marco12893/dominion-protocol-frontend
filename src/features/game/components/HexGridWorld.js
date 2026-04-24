@@ -1,6 +1,12 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FALLBACK_UNIT_DISPLAY,
+  UNIT_DISPLAY_INFO,
+} from "@/features/game/constants";
+import HexUnitProductionModal from "@/features/game/components/modals/HexUnitProductionModal";
 import {
   hexToPixel,
   pixelToHex,
@@ -15,6 +21,15 @@ import {
   HEX_TERRAIN_ASSETS,
   HEX_SPRITE_ASSETS,
 } from "@/features/game/constants/hexTerrainAssets";
+import {
+  RESOURCE_ICON_ASSETS,
+  RESOURCE_LABELS,
+  RESOURCE_MARKER_SPRITE_KEYS,
+  RESOURCE_TRACKER_ORDER,
+  computeCityIncome,
+  normalizeResourceCounts,
+  normalizeResourceLedger,
+} from "@/features/game/constants/hexEconomy";
 
 const HEX_SIZE = 32;
 const GRID_COLS = 40;
@@ -27,6 +42,7 @@ const MOVEMENT_RANGE = 2;
 const CITY_BORDER_RANGE = 1;
 const TILE_HALF_WIDTH = HEX_BASE_TILE_WIDTH / 2;
 const TILE_HALF_HEIGHT = HEX_BASE_TILE_HEIGHT / 2;
+const RESOURCE_BADGE_SIZE = 18;
 const HEX_CORNERS = hexCorners(0, 0, HEX_SIZE - 1);
 const HEX_SIDE_SEGMENTS = [
   [0, 1],
@@ -51,6 +67,7 @@ const COLORS = {
   moveFill: "rgba(34, 211, 238, 0.12)",
   moveStroke: "rgba(34, 211, 238, 0.4)",
   selectedRing: "rgba(252, 211, 77, 0.85)",
+  selectedCityRing: "rgba(245, 158, 11, 0.95)",
   unitBlue: "#22d3ee",
   unitRed: "#fb7185",
   unitDotRadius: 8,
@@ -86,18 +103,20 @@ const TERRAIN_FALLBACK_COLORS = {
   "Snow+Hill": "#dce9f3",
 };
 
+const PLAYER_COLORS = ["blue", "red"];
+
 const DEFAULT_CITIES = [
-  { id: "city-blue", centerCol: 6, centerRow: 6, owner: "blue" },
-  { id: "city-red", centerCol: 33, centerRow: 22, owner: "red" },
+  { id: "city-blue", name: "Azure Crown", centerCol: 6, centerRow: 6, owner: "blue" },
+  { id: "city-red", name: "Crimson Forge", centerCol: 33, centerRow: 22, owner: "red" },
 ];
 
 const INITIAL_HEX_UNITS = [
-  { id: "hex-u1", col: 5, row: 4, owner: "blue" },
-  { id: "hex-u2", col: 8, row: 8, owner: "blue" },
-  { id: "hex-u3", col: 10, row: 6, owner: "blue" },
-  { id: "hex-u4", col: 32, row: 21, owner: "red" },
-  { id: "hex-u5", col: 35, row: 23, owner: "red" },
-  { id: "hex-u6", col: 30, row: 24, owner: "red" },
+  { id: "hex-u1", col: 5, row: 4, owner: "blue", variantId: "rifleman" },
+  { id: "hex-u2", col: 8, row: 8, owner: "blue", variantId: "antiTank" },
+  { id: "hex-u3", col: 10, row: 6, owner: "blue", variantId: "lightTank" },
+  { id: "hex-u4", col: 32, row: 21, owner: "red", variantId: "rifleman" },
+  { id: "hex-u5", col: 35, row: 23, owner: "red", variantId: "antiTank" },
+  { id: "hex-u6", col: 30, row: 24, owner: "red", variantId: "lightTank" },
 ];
 
 function getTerrainIndex(col, row) {
@@ -236,6 +255,40 @@ function drawSprite(ctx, spriteImages, assetKey, sx, sy, {
   ctx.restore();
 }
 
+function drawResourceBadge(ctx, spriteImages, resourceType, sx, sy) {
+  const assetKey = RESOURCE_MARKER_SPRITE_KEYS[resourceType];
+  if (!assetKey) {
+    return;
+  }
+
+  const sprite = spriteImages.get(assetKey);
+  if (!sprite?.complete || sprite.naturalWidth === 0 || sprite.naturalHeight === 0) {
+    return;
+  }
+
+  const badgeX = sx + 18;
+  const badgeY = sy + 16;
+  const iconSize = RESOURCE_BADGE_SIZE;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(8, 15, 23, 0.92)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(badgeX, badgeY, iconSize / 2 + 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.drawImage(
+    sprite,
+    badgeX - iconSize / 2,
+    badgeY - iconSize / 2,
+    iconSize,
+    iconSize,
+  );
+  ctx.restore();
+}
+
 function drawTerritoryBorderSegment(ctx, sx, sy, sideIndex, theme) {
   const corners = hexCorners(sx, sy, HEX_SIZE - 0.6);
   const [startIndex, endIndex] = HEX_SIDE_SEGMENTS[sideIndex];
@@ -327,6 +380,10 @@ function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages, cityHexMap, city
         scale: 1,
       });
     }
+
+    if (tile.terrainTile?.resourceType) {
+      drawResourceBadge(ctx, tileImages, tile.terrainTile.resourceType, tile.sx, tile.sy);
+    }
   }
 
   ctx.strokeStyle = COLORS.hexStroke;
@@ -358,6 +415,33 @@ function drawGrid(ctx, camera, vw, vh, terrainGrid, tileImages, cityHexMap, city
       drawTerritoryBorderSegment(ctx, tile.sx, tile.sy, sideIndex, ownerTheme);
     }
   }
+}
+
+function drawSelectedCity(ctx, camera, city, renderTime) {
+  if (!city) {
+    return;
+  }
+
+  const { x: wx, y: wy } = hexToPixel(city.centerCol, city.centerRow, HEX_SIZE);
+  const sx = wx - camera.x;
+  const sy = wy - camera.y;
+  const pulse = 0.45 + 0.25 * Math.sin(renderTime * 0.005);
+
+  ctx.save();
+  ctx.fillStyle = `rgba(245, 158, 11, ${0.12 + pulse * 0.08})`;
+  drawHexPath(ctx, sx, sy, HEX_SIZE + 1);
+  ctx.fill();
+
+  ctx.strokeStyle = COLORS.selectedCityRing;
+  ctx.lineWidth = 3;
+  drawHexPath(ctx, sx, sy, HEX_SIZE + 1);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(251, 191, 36, ${0.2 + pulse * 0.25})`;
+  ctx.lineWidth = 1.5;
+  drawHexPath(ctx, sx, sy, HEX_SIZE + 5);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawMovementOverlay(ctx, camera, moveHexes) {
@@ -497,6 +581,13 @@ function drawUnits(ctx, camera, units, selectedUnitId, renderTime, movedUnitIds,
     ctx.arc(sx, sy, COLORS.unitDotRadius + 2, 0, Math.PI * 2);
     ctx.stroke();
 
+    const unitLabel = UNIT_DISPLAY_INFO[unit.variantId]?.shortLabel ?? FALLBACK_UNIT_DISPLAY.shortLabel;
+    ctx.fillStyle = "rgba(241, 245, 249, 0.95)";
+    ctx.font = unitLabel.length > 1 ? "700 7px ui-sans-serif" : "700 8px ui-sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(unitLabel, sx, sy + 0.5);
+
     if (hasMoved && isOwned) {
       ctx.globalAlpha = 1;
     }
@@ -526,6 +617,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const [cities, setCities] = useState(DEFAULT_CITIES);
   const [terrainGrid, setTerrainGrid] = useState(() => createEmptyTerrainGrid());
   const [selectedUnitId, setSelectedUnitId] = useState(null);
+  const [selectedCityId, setSelectedCityId] = useState(null);
   const [, setCamera] = useState({ x: 0, y: 0 });
   const [hoveredHex, setHoveredHex] = useState(null);
   const [pendingMoves, setPendingMoves] = useState(new Map());
@@ -533,6 +625,15 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  const [isBuildModalOpen, setIsBuildModalOpen] = useState(false);
+  const [buildError, setBuildError] = useState("");
+  const [resourceStockpiles, setResourceStockpiles] = useState(
+    normalizeResourceLedger({}, PLAYER_COLORS),
+  );
+  const [resourceIncome, setResourceIncome] = useState(
+    normalizeResourceLedger({}, PLAYER_COLORS),
+  );
+  const [unitProductionCatalog, setUnitProductionCatalog] = useState({});
 
   const hexUnitsRef = useRef(hexUnits);
   useEffect(() => {
@@ -595,12 +696,24 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       }
 
       if (Array.isArray(snapshot?.hexUnits)) {
-        setHexUnits(snapshot.hexUnits);
+        setHexUnits(snapshot.hexUnits.map((unit) => ({
+          ...unit,
+          variantId: unit.variantId ?? "rifleman",
+        })));
       }
 
       if (typeof snapshot?.turnNumber === "number") {
         setTurnNumber(snapshot.turnNumber);
       }
+
+      setResourceStockpiles(
+        normalizeResourceLedger(snapshot?.resourceStockpiles, PLAYER_COLORS),
+      );
+      setResourceIncome(
+        normalizeResourceLedger(snapshot?.resourceIncome, PLAYER_COLORS),
+      );
+      setUnitProductionCatalog(snapshot?.unitProductionCatalog ?? {});
+      setBuildError("");
 
       const readyPlayers = Array.isArray(snapshot?.readyPlayers) ? snapshot.readyPlayers : [];
       setPlayerReady(Boolean(playerColor) && readyPlayers.includes(playerColor));
@@ -664,6 +777,8 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       setPendingMoves(new Map());
       setPlayerReady(false);
       setOpponentReady(false);
+      setBuildError("");
+      setIsBuildModalOpen(false);
 
       const appliedMoves = Array.isArray(resolved?.appliedMoves) ? resolved.appliedMoves : [];
       const animationStart = performance.now();
@@ -684,15 +799,33 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       }));
 
       window.setTimeout(() => {
-        setHexUnits(Array.isArray(resolved?.hexUnits) ? resolved.hexUnits : INITIAL_HEX_UNITS);
+        setHexUnits(
+          Array.isArray(resolved?.hexUnits)
+            ? resolved.hexUnits.map((unit) => ({
+              ...unit,
+              variantId: unit.variantId ?? "rifleman",
+            }))
+            : INITIAL_HEX_UNITS,
+        );
         setTurnNumber(typeof resolved?.turnNumber === "number" ? resolved.turnNumber : 1);
+        setResourceStockpiles(
+          normalizeResourceLedger(resolved?.resourceStockpiles, PLAYER_COLORS),
+        );
+        setResourceIncome(
+          normalizeResourceLedger(resolved?.resourceIncome, PLAYER_COLORS),
+        );
         setIsResolving(false);
       }, TURN_RESOLVE_ANIMATION_MS);
+    }
+
+    function handleBuildRejected(rejected) {
+      setBuildError(rejected?.error || "Unable to build unit.");
     }
 
     socket.on("hex:state", applyState);
     socket.on("hex:moveSubmitted", handleMoveSubmitted);
     socket.on("hex:moveCancelled", handleMoveCancelled);
+    socket.on("hex:buildRejected", handleBuildRejected);
     socket.on("hex:playerReady", handlePlayerReady);
     socket.on("hex:playerUnready", handlePlayerUnready);
     socket.on("hex:turnResolved", handleTurnResolved);
@@ -703,6 +836,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
       socket.off("hex:state", applyState);
       socket.off("hex:moveSubmitted", handleMoveSubmitted);
       socket.off("hex:moveCancelled", handleMoveCancelled);
+      socket.off("hex:buildRejected", handleBuildRejected);
       socket.off("hex:playerReady", handlePlayerReady);
       socket.off("hex:playerUnready", handlePlayerUnready);
       socket.off("hex:turnResolved", handleTurnResolved);
@@ -712,6 +846,11 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const selectedUnit = useMemo(
     () => hexUnits.find((unit) => unit.id === selectedUnitId) || null,
     [hexUnits, selectedUnitId],
+  );
+
+  const selectedCity = useMemo(
+    () => cities.find((city) => city.id === selectedCityId) || null,
+    [cities, selectedCityId],
   );
 
   const cityHexMap = useMemo(() => {
@@ -729,6 +868,34 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const cityCenterSet = useMemo(
     () => new Set(cities.map((city) => getHexKey(city.centerCol, city.centerRow))),
     [cities],
+  );
+
+  const selectedOwnedCity = useMemo(
+    () => (
+      selectedCity && playerColor && selectedCity.owner === playerColor
+        ? selectedCity
+        : null
+    ),
+    [playerColor, selectedCity],
+  );
+
+  const selectedCityIncome = useMemo(
+    () => (
+      selectedOwnedCity
+        ? computeCityIncome(selectedOwnedCity, terrainGrid, GRID_COLS, GRID_ROWS)
+        : normalizeResourceCounts({})
+    ),
+    [selectedOwnedCity, terrainGrid],
+  );
+
+  const currentResourceStockpile = useMemo(
+    () => normalizeResourceCounts(resourceStockpiles[playerColor]),
+    [playerColor, resourceStockpiles],
+  );
+
+  const currentResourceIncome = useMemo(
+    () => normalizeResourceCounts(resourceIncome[playerColor]),
+    [playerColor, resourceIncome],
   );
 
   const moveHexes = useMemo(
@@ -763,11 +930,16 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
             return false;
           }
 
-          return !blockedHexKeys.has(getHexKey(col, row));
+          const key = getHexKey(col, row);
+          if (cityCenterSet.has(key)) {
+            return false;
+          }
+
+          return !blockedHexKeys.has(key);
         },
       );
     },
-    [hexUnits, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
+    [cityCenterSet, hexUnits, movedUnitIds, pendingMoves, playerColor, selectedUnit, terrainGrid],
   );
 
   const moveHexSet = useMemo(
@@ -779,12 +951,30 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
   const cityCenterSetRef = useRef(cityCenterSet);
   const moveHexesRef = useRef(moveHexes);
   const moveHexSetRef = useRef(moveHexSet);
+  const selectedCityRef = useRef(selectedCity);
   useEffect(() => {
     cityHexMapRef.current = cityHexMap;
     cityCenterSetRef.current = cityCenterSet;
     moveHexesRef.current = moveHexes;
     moveHexSetRef.current = moveHexSet;
-  }, [cityCenterSet, cityHexMap, moveHexes, moveHexSet]);
+    selectedCityRef.current = selectedCity;
+  }, [cityCenterSet, cityHexMap, moveHexes, moveHexSet, selectedCity]);
+
+  useEffect(() => {
+    if (!isBuildModalOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setBuildError("");
+        setIsBuildModalOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isBuildModalOpen]);
 
   const clampCam = useCallback((nextCamera) => {
     const maxX = Math.max(0, HEX_WORLD_WIDTH - (windowSize?.width || 800));
@@ -880,16 +1070,30 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
 
     const currentCamera = cameraRef.current;
     const clickedHex = pixelToHex(event.clientX + currentCamera.x, event.clientY + currentCamera.y, HEX_SIZE);
+    const clickedCity = cities.find(
+      (city) => city.centerCol === clickedHex.col && city.centerRow === clickedHex.row,
+    );
     const clickedUnit = hexUnitsRef.current.find(
       (unit) => unit.col === clickedHex.col && unit.row === clickedHex.row,
     );
     const currentSelection = selectedUnitIdRef.current;
 
+    if (clickedCity) {
+      setSelectedUnitId(null);
+      setSelectedCityId(clickedCity.id);
+      setBuildError("");
+      return;
+    }
+
     if (clickedUnit) {
       if (clickedUnit.owner === playerColor) {
         setSelectedUnitId(clickedUnit.id);
+        setSelectedCityId(null);
+        setIsBuildModalOpen(false);
       } else {
         setSelectedUnitId(null);
+        setSelectedCityId(null);
+        setIsBuildModalOpen(false);
       }
       return;
     }
@@ -914,11 +1118,14 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
           toRow: clickedHex.row,
         });
         setSelectedUnitId(null);
+        setSelectedCityId(null);
         return;
       }
     }
 
     setSelectedUnitId(null);
+    setSelectedCityId(null);
+    setIsBuildModalOpen(false);
   }
 
   function handleEndTurn() {
@@ -947,6 +1154,32 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     if (selectedUnitIdRef.current === unitId) {
       setSelectedUnitId(null);
     }
+  }
+
+  function handleOpenBuildModal() {
+    if (!selectedOwnedCity || playerReady || isResolving) {
+      return;
+    }
+
+    setBuildError("");
+    setIsBuildModalOpen(true);
+  }
+
+  function handleCloseBuildModal() {
+    setBuildError("");
+    setIsBuildModalOpen(false);
+  }
+
+  function handleBuildUnit(variantId) {
+    if (!selectedOwnedCity || !variantId || playerReady || isResolving) {
+      return;
+    }
+
+    setBuildError("");
+    socketRef.current?.emit("hex:buildUnit", {
+      cityId: selectedOwnedCity.id,
+      variantId,
+    });
   }
 
   useEffect(() => {
@@ -1017,6 +1250,7 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
         cityHexMapRef.current,
         cityCenterSetRef.current,
       );
+      drawSelectedCity(ctx, currentCamera, selectedCityRef.current, renderTime);
       drawMovementOverlay(ctx, currentCamera, moveHexesRef.current);
       drawHoveredHex(ctx, currentCamera, hoveredHexRef.current, moveHexSetRef.current);
       drawPendingMoves(ctx, currentCamera, pendingMovesRef.current, hexUnitsRef.current, renderTime);
@@ -1041,8 +1275,10 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     .filter(([unitId]) => hexUnits.find((unit) => unit.id === unitId)?.owner === playerColor)
     .map(([unitId, move]) => {
       const unit = hexUnits.find((entry) => entry.id === unitId);
+      const unitDisplay = UNIT_DISPLAY_INFO[unit?.variantId] ?? FALLBACK_UNIT_DISPLAY;
       return {
         unitId,
+        unitLabel: unitDisplay.name,
         move,
         fromCol: unit?.col,
         fromRow: unit?.row,
@@ -1060,12 +1296,134 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
     >
       <canvas ref={canvasRef} className="absolute inset-0" />
 
-      <div className="absolute bottom-6 left-1/2 z-[70] flex -translate-x-1/2 items-end gap-4 pointer-events-auto">
-        <div className="rounded-xl border border-white/10 bg-[#0f1722]/90 px-5 py-2.5 shadow-2xl backdrop-blur-md">
-          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Turn </span>
-          <span className="text-lg font-black text-white">{turnNumber}</span>
-        </div>
+      {playerColor && (
+        <div
+          className="absolute left-1/2 top-4 z-[80] flex w-[min(960px,calc(100%-1.5rem))] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-[24px] border border-white/10 bg-[#09121bcc]/90 px-3 py-2.5 shadow-[0_22px_50px_rgba(0,0,0,0.34)] backdrop-blur-xl"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="mr-1 rounded-2xl border border-white/8 bg-white/5 px-4 py-2 text-center">
+            <div className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-500">
+              Turn
+            </div>
+            <div className="text-lg font-black text-white">{turnNumber}</div>
+          </div>
 
+          {RESOURCE_TRACKER_ORDER.map((resourceType) => (
+            <div
+              key={resourceType}
+              className="flex min-w-[120px] items-center gap-3 rounded-2xl border border-white/8 bg-white/5 px-3 py-2"
+            >
+              <img
+                src={RESOURCE_ICON_ASSETS[resourceType]}
+                alt={RESOURCE_LABELS[resourceType]}
+                className="h-7 w-7 object-contain"
+              />
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
+                  {RESOURCE_LABELS[resourceType]}
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-black text-white">
+                    {currentResourceStockpile[resourceType]}
+                  </span>
+                  <span className="text-sm font-bold text-emerald-300">
+                    +{currentResourceIncome[resourceType]}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedOwnedCity && (
+        <div
+          className="absolute bottom-28 left-1/2 z-[85] w-[min(680px,calc(100%-1.5rem))] -translate-x-1/2 pointer-events-auto"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex flex-col gap-3 rounded-[28px] border border-amber-300/15 bg-[linear-gradient(160deg,rgba(18,31,42,0.95),rgba(10,18,27,0.96))] px-4 py-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.35em] text-amber-300/70">
+                Selected City
+              </div>
+              <div className="mt-1 text-xl font-black text-white">
+                {selectedOwnedCity.name ?? selectedOwnedCity.id}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {RESOURCE_TRACKER_ORDER.map((resourceType) => {
+                  const incomeValue = selectedCityIncome[resourceType];
+                  if (incomeValue <= 0) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      key={resourceType}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-100"
+                    >
+                      <img
+                        src={RESOURCE_ICON_ASSETS[resourceType]}
+                        alt={RESOURCE_LABELS[resourceType]}
+                        className="h-4 w-4 object-contain"
+                      />
+                      <span>+{incomeValue}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenBuildModal}
+              disabled={playerReady || isResolving}
+              className={`group inline-flex items-center justify-center gap-3 rounded-[24px] border px-4 py-3 text-left transition-all sm:min-w-[230px] ${
+                playerReady || isResolving
+                  ? "cursor-not-allowed border-white/8 bg-white/5 text-slate-500"
+                  : "border-amber-300/20 bg-[linear-gradient(145deg,rgba(120,74,27,0.92),rgba(69,43,18,0.96))] text-amber-50 shadow-[0_18px_36px_rgba(75,43,13,0.38)] hover:-translate-y-0.5 hover:border-amber-200/35 hover:bg-[linear-gradient(145deg,rgba(144,90,35,0.96),rgba(86,55,24,0.98))]"
+              }`}
+            >
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] border border-black/15 bg-black/10 shadow-inner">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="26"
+                  height="26"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m14 6 4 4" />
+                  <path d="m12.5 7.5-7 7" />
+                  <path d="m5.5 14.5-2 4 4-2" />
+                  <path d="m7 4 13 13" />
+                  <path d="m6.5 8-2.7-2.7a1.8 1.8 0 0 1 2.6-2.6L9 5.3" />
+                  <path d="m15 11.3 3.7 3.7a1.8 1.8 0 1 1-2.6 2.6L12.4 14" />
+                </svg>
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.28em] text-amber-100/70">
+                  City Tools
+                </div>
+                <div className="mt-1 text-sm font-black uppercase tracking-[0.2em]">
+                  Open Production
+                </div>
+                <div className="mt-1 text-xs text-amber-50/75">
+                  Recruit a unit on an open city tile.
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        className="absolute bottom-6 left-1/2 z-[70] flex -translate-x-1/2 items-end gap-4 pointer-events-auto"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         {myPendingCount > 0 && (
           <div className="min-w-[240px] max-w-[420px] rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 shadow-2xl backdrop-blur-md">
             <div className="flex items-center justify-between gap-4">
@@ -1079,14 +1437,14 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
               )}
             </div>
             <div className="mt-3 flex flex-col gap-2">
-              {myPendingMoves.map(({ unitId, move, fromCol, fromRow }) => (
+              {myPendingMoves.map(({ unitId, unitLabel, move, fromCol, fromRow }) => (
                 <div
                   key={unitId}
                   className="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-slate-950/40 px-3 py-2"
                 >
                   <div className="min-w-0">
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                      {unitId}
+                      {unitLabel}
                     </div>
                     <div className="text-xs font-semibold text-slate-200">
                       ({fromCol}, {fromRow}) to ({move.toCol}, {move.toRow})
@@ -1143,6 +1501,20 @@ export default function HexGridWorld({ windowSize, playerColor, socket, socketRe
           )}
         </button>
       </div>
+
+      {isBuildModalOpen && selectedOwnedCity && (
+        <HexUnitProductionModal
+          buildError={buildError}
+          city={selectedOwnedCity}
+          cityIncome={selectedCityIncome}
+          isBusy={playerReady || isResolving}
+          onBuildUnit={handleBuildUnit}
+          onClose={handleCloseBuildModal}
+          playerColor={playerColor}
+          resourceStockpile={currentResourceStockpile}
+          unitCatalog={unitProductionCatalog}
+        />
+      )}
     </div>
   );
 }
