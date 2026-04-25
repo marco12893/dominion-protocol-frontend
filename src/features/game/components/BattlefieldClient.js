@@ -561,7 +561,15 @@ export default function BattlefieldClient() {
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
 
-    socket.on("connect", () => setIsConnected(true));
+    socket.on("connect", () => {
+      setIsConnected(true);
+      // Re-register with the server on reconnect so the server re-maps
+      // this new socket ID to our team color in playerAssignments.
+      const currentColor = playerColorRef.current;
+      if (currentColor) {
+        socket.emit("player:join", currentColor);
+      }
+    });
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("game:reset", () => {
       clearPostBattleReturnTimeout();
